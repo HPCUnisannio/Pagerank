@@ -53,3 +53,71 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# IDE - Visual Studio Code
+.vscode/
+*.code-workspace
+
+# IDE - JetBrains (CLion, IntelliJ, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+cmake-build-debug/
+cmake-build-release/
+
+# IDE - Vim/Neovim
+.vim/
+*.swp
+*.swo
+*~
+
+# IDE - Emacs
+*~
+\#*\#
+.\#*
+
+# IDE - Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# IDE - Others
+.DS_Store
+.project
+.cproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Build directories
+build/
+dist/
+out/
+bin/
+*.cmake
+
+# Compilation artifacts
+*.i
+*.ii
+*.s
+
+# Documentation generated
+docs/html/
+docs/latex/
+doxygen/
+
+# Memory analyzers
+*.valgrind
+*.memcheck
+
+# VS Code specific
+settings.json
+launch.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+.vagrant/
