@@ -103,8 +103,6 @@ int main(int argc, char *argv[])
         index += co;
     }
 
-    /* AGGIUNTA DEBUG CSC */
-    // ← AGGIUNGI QUESTO DEBUG CSC
     printf("\n=== STRUTTURA CSC COSTRUITA (DEBUG) ===\n");
     printf("colptr: [");
     for (i = 0; i <= NODES; i++) {
@@ -138,25 +136,7 @@ int main(int argc, char *argv[])
                (fabs(col_sum - 1.0) < 0.0001) ? "✓" : "✗ ERRORE");
     }
     printf("\n");
-    // ← FINE DEBUG CSC
-    /* FINE AGGIUNTA */
 
-
-    /*
-    printf("this is the val array\n");
-    for(i = 0; i<EDGES; i++) {
-        printf("%f\t", val[i]);
-    }
-    printf("\n");
-    printf("this is the rowind array\n");
-    for(i=0; i<EDGES; i++) {
-        printf("%d\t", rowind[i]);
-    }
-    printf("\nthis is the colptr array\n");
-    for(i=0; i<NODES+1; i++) {
-        printf("%d\t", colptr[i]);
-    }
-    */
     printf("\n");
 
     // Thread creation
@@ -186,7 +166,7 @@ int main(int argc, char *argv[])
         sum_pr += prold[i];
     }
     printf("\nSomma PR = %.10f\n", sum_pr);
-    /* FINE AGGIUNTA*/
+
 
     printf("Printing pagerank vector (CONVERGED)\n");
     for(j=0; j<NODES; j++) {

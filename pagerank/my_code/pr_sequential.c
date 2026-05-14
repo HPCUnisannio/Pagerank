@@ -343,8 +343,7 @@ int main(int argc, char *argv[])
     }
 
 
-   /* Aggiunta per printare la CSC costruita*/
-   // ← AGGIUNGI QUESTA STAMPA CSC
+
    printf("\n=== STRUTTURA CSC COSTRUITA ===\n");
    printf("colptr: [");
    for (i = 0; i <= NODES; i++) {
@@ -378,7 +377,7 @@ int main(int argc, char *argv[])
    printf("\n");
 
    printf("CSC construction complete\n");
-   /* FINE STAMPA CSC */
+
 
     /* ════════════════════════════════════════════════════════════════════════
        POWER ITERATION
@@ -501,6 +500,11 @@ int main(int argc, char *argv[])
        In un programma che termina subito il SO la recupera comunque,
        ma è buona pratica e obbligatoria in programmi di lunga durata.
     */
+
+   double sum_pr=0;
+   for(int i=0;i<NODES;i++) sum_pr+=prnew[i];
+   printf("Somma PR = %.10f\n", sum_pr);
+
     free(val);
     free(rowind);
     free(colptr);
@@ -511,13 +515,6 @@ int main(int argc, char *argv[])
     free(diff);
     free(sum);
 
-
-
-   double sum_pr=0;
-   for(int i=0;i<NODES;i++) sum_pr+=prnew[i];
-   printf("Somma PR = %.10f\n", sum_pr);
-   return 0;
-
     /* ── riga 229: return 0 ─────────────────────────────────────────────────
        Restituisce 0 al sistema operativo: convenzione Unix per "successo".
        Qualsiasi valore != 0 segnala un errore (usato dagli script shell
@@ -525,4 +522,3 @@ int main(int argc, char *argv[])
     */
     return 0;
 }
-
