@@ -61,7 +61,7 @@ Il programma legge automaticamente il numero di thread come primo argomento dell
 
 **Compilazione (Esempio con CMake/Make):**
 ```bash
-mpicc -O3 -fopenmp -o pagerank_hybrid pr_mpi_OpenMP.c -lm
+mpicc -O3 -fopenmp -o pagerank_hybrid pr_mpi_openmp_distributed.c -lm
 
 */
 
@@ -81,7 +81,7 @@ mpicc -O3 -fopenmp -o pagerank_hybrid pr_mpi_OpenMP.c -lm
 /*
  *PER RUNNARE PRIMA SETTARE NUMERO THREAD COME ARGOMENTO DA PASSARE AL MAIN
  *ESEMPIO 3 Processi MPI x 2 Thread
-mpiexec -n 3 ".\cmake-build-debug\pr_mpi_OpenMP3.exe" 2
+mpiexec -n 3 ".\cmake-build-debug\pr_mpi_openmp_distributed.exe" 2
 */
 
 //#define FILEPATH "../pagerank/dataset/data2.dat"
