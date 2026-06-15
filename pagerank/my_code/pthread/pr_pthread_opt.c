@@ -126,6 +126,7 @@ e l'assenza assoluta di conflitti di scrittura (Race Conditions).
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include "data.h"
 
 // Gestione del tempo cross-platform (Windows / Linux)
 #ifdef _WIN32
@@ -144,15 +145,8 @@ double get_time() {
         return t.tv_sec + t.tv_nsec / 1e9;
     }
 #endif
-
-#define NODES   4039
-#define EDGES   176468
-// Definizioni fisse del Dataset Web-BerkStan (data2.dat)
-//#define NODES 685230     // Numero totale di pagine web (Nodi del grafo)
-//#define EDGES 7600595    // Numero totale di collegamenti/link (Archi del grafo)
 #define CORES 6          // Numero di thread paralleli che lavoreranno insieme
 #define MASTER 0         // Identificativo del thread principale
-#define FILEPATH "../../dataset/data1.dat"
 
 double sqrt(double x);
 void *mat_vec(void *);
@@ -181,6 +175,10 @@ pthread_barrier_t our_barrier;       // Barriera 1: Aspetta la fine della scritt
 pthread_barrier_t our_barrier2;      // Barriera 2: Aspetta la fine del calcolo delle norme locali
 double norm, norm_sq, err = 0.00001; // Soglia di precisione per la convergenza
 
+int NODES;
+int EDGES;
+const char* FILEPATH;
+
 int main(int argc, char *argv[])
 {
     printf("Program start (Privatized Version)\n");
@@ -189,6 +187,13 @@ int main(int argc, char *argv[])
     // Inizializziamo le barriere specificando che dovranno scattare solo quando 6 core (CORES) le avranno raggiunte
     pthread_barrier_init(&our_barrier, NULL, CORES);
     pthread_barrier_init(&our_barrier2, NULL, CORES);
+
+    GraphType graph_type = GRAPH_BIGGEST;
+    const Graph* graph = get_graph(graph_type);
+
+    NODES = graph->nodes;
+    EDGES = graph->edges;
+    FILEPATH = graph->filepath;
 
     FILE *fp;
     int colindex, link, i, j=0, colmatch=0, localsum=0;

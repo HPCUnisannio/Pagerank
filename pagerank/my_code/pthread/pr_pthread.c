@@ -125,6 +125,8 @@ while(current_norm > ERR) su un valore coerente, e terminano all'unisono.
 #include <string.h>
 #include <pthread.h>
 
+#include "data.h"
+
 #ifdef _WIN32
     #include <windows.h>
     double get_time() {
@@ -142,17 +144,8 @@ double get_time() {
     }
 #endif
 
-#define NODES 6
-#define EDGES 19
-
-
-
-//#define NODES 685230
-//#define EDGES 7600595
-
 #define CORES 2
 #define MASTER 0
-#define FILEPATH "C:\\Users\\UTENTE\\Desktop\\Calcolo Parallelo\\Ipotesi Progetto\\Pagerank\\pagerank\\dataset\\data0.dat"
 #define ERR 0.00001
 #define DAMPING 0.85
 
@@ -181,6 +174,10 @@ int var_wait;
 double global_dangling_mass;
 pthread_mutex_t dangling_mutex;
 
+int NODES;
+int EDGES;
+const char* FILEPATH;
+
 int main(int argc, char *argv[])
 {
     printf("Program start\n");
@@ -194,6 +191,13 @@ int main(int argc, char *argv[])
     pthread_barrier_init(&our_barrier, NULL, CORES);
     pthread_barrier_init(&our_barrier2, NULL, CORES);
     pthread_cond_init(&proceed_cv, NULL);
+
+    GraphType graph_type = GRAPH_BIGGEST;
+    const Graph* graph = get_graph(graph_type);
+
+    NODES = graph->nodes;
+    EDGES = graph->edges;
+    FILEPATH = graph->filepath;
 
     FILE *fp;
     int colindex, link, i, j=0, col, colmatch=0, localsum=0;

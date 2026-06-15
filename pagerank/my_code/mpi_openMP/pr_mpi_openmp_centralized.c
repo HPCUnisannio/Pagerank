@@ -1,45 +1,62 @@
 /*
 PageRank Ibrido (MPI + OpenMP) - Versione ad Architettura Distribuita con I/O Centralizzato
-Questa variante del PageRank ibrido introduce un modello a memoria distribuita pura per la gestione della matrice del grafo. A differenza della versione precedente (in cui ogni processo leggeva ridondantemente il file intero), qui la gestione dell'I/O e la costruzione della struttura dati iniziale sono completamente centralizzate sul processo MASTER, ottimizzando drasticamente l'occupazione di RAM sui nodi di calcolo (Worker).
+Questa variante del PageRank ibrido introduce un modello a memoria distribuita pura per la gestione della matrice del grafo.
+A differenza della versione precedente (in cui ogni processo leggeva ridondantemente il file intero),
+qui la gestione dell'I/O e la costruzione della struttura dati iniziale sono completamente centralizzate
+sul processo MASTER, ottimizzando drasticamente l'occupazione di RAM sui nodi di calcolo (Worker).
 
-🎯 Innovazioni e Differenze Architetturali Rispetto alla Versione Precedente
+Innovazioni e Differenze Architetturali Rispetto alla Versione Precedente
 1. I/O Centralizzato e Isolamento dei Worker
-Master-Only I/O: Solo il processo MASTER (rank == 0) apre il file, esegue il parsing del testo tramite fscanf e costruisce la struttura in formato CSC (Compressed Sparse Column).
+Master-Only I/O: Solo il processo MASTER (rank == 0) apre il file, esegue il parsing del testo tramite fscanf e
+costruisce la struttura in formato CSC (Compressed Sparse Column).
 
-Zero Overhead di File System per i Worker: I nodi di calcolo non accedono al disco, eliminando i colli di bottiglia legati all'I/O concorrente su cluster.
+Zero Overhead di File System per i Worker: I nodi di calcolo non accedono al disco, eliminando i colli di bottiglia
+legati all'I/O concorrente su cluster.
 
 2. Massima Efficienza della Memoria (RAM)
-Nella versione precedente, ogni processo manteneva in memoria gli interi array globali val e rowind di dimensione pari a EDGES (milioni di archi).
+Nella versione precedente, ogni processo manteneva in memoria gli interi array globali val e rowind di
+dimensione pari a EDGES (milioni di archi).
 
-In questa versione, gli array globali vengono allocati esclusivamente dal Master. I Worker allocano solo i buffer locali rec_val e rec_row di dimensione my_cnt (esattamente la quota di non-zeri di loro competenza). Il Master, subito dopo la distribuzione, libera (free) la matrice globale.
+In questa versione, gli array globali vengono allocati esclusivamente dal Master. I Worker allocano solo
+i buffer locali rec_val e rec_row di dimensione my_cnt (esattamente la quota di non-zeri di loro competenza).
+Il Master, subito dopo la distribuzione, libera (free) la matrice globale.
 
 3. Distribuzione Intelligente in Due Fasi (Metadati + Dati)
-Fase 1 (Metadati): Viene eseguito un MPI_Bcast degli array di controllo colptr e readsum. Grazie a queste informazioni, ogni processo (Master e Worker) è in grado di calcolare autonomamente le dimensioni esatte dei blocchi di colonne (pcols) e il numero esatto di non-zeri associati (sendcnts e displs).
+Fase 1 (Metadati): Viene eseguito un MPI_Bcast degli array di controllo colptr e readsum.
+Grazie a queste informazioni, ogni processo (Master e Worker) è in grado di calcolare autonomamente le
+dimensioni esatte dei blocchi di colonne (pcols) e il numero esatto di non-zeri associati (sendcnts e displs).
 
-Fase 2 (Dati Pesanti): Viene eseguita una MPI_Scatterv per distribuire i coefficienti della matrice (val) e gli indici di riga (rowind). Ogni processo riceve solo ciò che deve effettivamente computare.
+Fase 2 (Dati Pesanti): Viene eseguita una MPI_Scatterv per distribuire i dati veri e propri, ovvero i valori
+della matrice (val) e gli indici di riga (rowind). Ogni processo riceve solo ciò che deve effettivamente computare.
 
-⚙️ Flusso di Esecuzione delle Iterazioni (OpenMP Coarse-Grained)
-Il cuore del calcolo mantiene l'eccellente ottimizzazione a grana grossa (regione parallela aperta una sola volta fuori dal do-while), ma lavora sui buffer locali:
 
-Fase A (SpMV Locale Distribuita): I thread OpenMP eseguono il prodotto matrice-vettore ciclando sulle colonne locali (rec_col). Gli indici per accedere a rec_val e rec_row vengono mappati scalando l'offset globale (displs[rank]). L'accumulo avviene sui vettori privati local_sum per eliminare i conflitti di scrittura.
+ Flusso di Esecuzione delle Iterazioni (OpenMP Coarse-Grained)
+Il cuore del calcolo mantiene l'eccellente ottimizzazione a grana grossa (regione parallela aperta una sola volta
+fuori dal do-while), ma lavora sui buffer locali:
 
-Fase B (Riduzione Thread): I vettori privati dei thread vengono ridotti nel vettore sum locale al processo tramite istruzioni vettoriali SIMD.
+Fase A (SpMV Locale Distribuita): I thread OpenMP eseguono il prodotto matrice-vettore ciclando sulle colonne locali (rec_col).
+Gli indici per accedere a rec_val e rec_row vengono mappati scalando l'offset globale (displs[rank]).
+L'accumulo avviene sui vettori privati local_sum per eliminare i conflitti di scrittura e massimizzare la parallelizzazione.
+Infatti grazie alla privatizzazione evitiamo sezioni critiche e lock in quanto è impossibile che i thread interferiscano tra loro.
 
-Fase C (Overlap Rete/CPU con Iallreduce): Viene lanciata la MPI_Iallreduce asincrona sul vettore sum. Mentre la rete scambia i dati globali, la CPU calcola in parallelo la dangling mass locale (dm_local).
+Fase B (Riduzione Thread): I vettori privati dei thread vengono ridotti nel vettore sum locale al processo
+tramite istruzioni vettoriali SIMD.
 
-Fase D & E (Post-Processing e Norma): Ricevuto il PageRank globale tramite MPI_Wait, i processi applicano il damping e calcolano lo scarto quadratico medio solo per le proprie colonne, garantendo un bilanciamento del carico simmetrico e scalabile.
+Fase C (Overlap Rete/CPU con Iallreduce): Viene lanciata la MPI_Iallreduce asincrona sul vettore sum.
+Mentre la rete scambia i dati globali, la CPU calcola in parallelo la dangling mass locale (dm_local).
+Purtoppo non si riesce a fare altro in quanto solo il calcolo della dangling mass locale è indipendente dalla riduzione.
 
-📊 Vantaggi e Svantaggi di questo Approccio
-Vantaggi:
-Footprint di Memoria Ottimale: Ideale per cluster con nodi aventi RAM limitata, poiché la matrice intera risiede solo sul Master per pochi istanti.
 
-Flessibilità d'Uso: Funziona su qualsiasi architettura di cluster (anche senza file system condiviso), dato che i nodi ricevono i dati esclusivamente via rete MPI.
+Fase D & E (Post-Processing e Norma): Ricevuto il PageRank globale tramite MPI_Wait, i processi applicano il damping
+e calcolano lo scarto quadratico medio solo per le proprie colonne, garantendo un bilanciamento del carico simmetrico
+e scalabile, evitando di stare fermi ad attendere mentre un solo processo si carica l'onere del post processing.
 
-Svantaggi / Limitazioni:
-Collo di Bottiglia sul Master in Fase di Setup: La lettura sequenziale con fscanf e la successiva MPI_Scatterv gravano interamente sul Master. Per grafi nell'ordine di centinaia di milioni di archi, la fase di inizializzazione potrebbe richiedere molto tempo (sebbene il ciclo di calcolo rimanga velocissimo).
+
+Ovviamente una grande limitazione è rappresentata dal fatto che abbiamo un Collo di Bottiglia sul Master in
+Fase di Setup: La lettura sequenziale con fscanf e la successiva MPI_Scatterv gravano interamente sul Master.
+Per grafi nell'ordine di centinaia di milioni di archi, la fase di inizializzazione potrebbe richiedere molto tempo
+(sebbene il ciclo di calcolo rimanga velocissimo).
 */
-
-
 
 #include <stdio.h>
 #include <math.h>
@@ -48,23 +65,24 @@ Collo di Bottiglia sul Master in Fase di Setup: La lettura sequenziale con fscan
 #include <mpi.h>
 #include <omp.h>
 
-/*
-#define NODES 685230
-#define EDGES 7600595
-#define FILEPATH "pagerank/dataset/data2.dat"
-*/
-//mpiexec -n 2 ".\cmake-build-debug\pr_mpi_OpenMP6.exe" 6
-// PER TEST CORRETTEZZA
-#define NODES 6
-#define EDGES 19
-#define FILEPATH "pagerank/dataset/data0.dat"
-
+#include "data.h"
 #define MASTER 0
 #define DAMPING 0.85
 #define ERROR 0.00001
 
+/* Aumentare margine di convergenza per il dataset grande
+#define ERROR 0.0000001
+*/
+
 int main(int argc, char **argv)
 {
+    GraphType graph_type = GRAPH_BIGGEST;
+    const Graph* graph = get_graph(graph_type);
+
+    const int NODES = graph->nodes;
+    const int EDGES = graph->edges;
+    const char* FILEPATH = graph->filepath;
+
     int NPROC, rank, num_threads;
     if (argc > 1) {
         num_threads = atoi(argv[1]);
@@ -141,6 +159,7 @@ int main(int argc, char **argv)
                 fclose(fp);
                 MPI_Abort(MPI_COMM_WORLD, 1);
             }
+            // Commentare per usare il dataset soc live journal il quale è già 0 indexed
             colindex--; link--;
             rowind[i] = link;
 
@@ -326,7 +345,7 @@ int main(int argc, char **argv)
             #pragma omp master
             t_phase = MPI_Wtime();
 
-            // MAGIA DEL DISTRIBUITO: Invece di iterare su NODES, iteriamo solo su rec_col!
+            // Distribuendo iteriamo solo su rec_col di competenza del processo specifico invece che su tutti i NODES
             #pragma omp for simd reduction(+:norm_sq_local)
             for (i = 0; i < rec_col; i++) {
                 int global_col = global_col_start + i;
@@ -384,7 +403,8 @@ int main(int argc, char **argv)
     double time_spent = end - begin;
 
     // ========================================================================
-    // VERIFICA MATEMATICA (Da disattivare in produzione)
+    // VERIFICA MATEMATICA CORRETTEZZA -> Commentabile, la uso solo per capire s
+    // l'algoritmo converge e funziona bene
     // Raccoglie i pezzi "puliti" calcolati nella Fase D da tutti i processi
     // ========================================================================
     double *full_pr = (double*)malloc(NODES * sizeof(double));
@@ -400,12 +420,14 @@ int main(int argc, char **argv)
         printf("VERIFICA MATEMATICA VETTORE PAGERANK:\n");
         printf("Somma totale di tutti gli elementi: %.10f\n", sum_pr);
         printf("Tempo iterazioni: %f secondi\n", time_spent);
+        /*
         printf("\n--- VETTORE FINALE (primi e ultimi) ---\n");
         for (i = 0; i < (NODES < 10 ? NODES : 10); i++)
         {
             printf("Nodo %d: %.6f\n", i + 1, full_pr[i]);
         }
         printf("=============================================\n");
+        */
     }
 
     free(full_pr);

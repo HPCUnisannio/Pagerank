@@ -61,8 +61,9 @@ la parallelizzazione del calcolo senza saturare la larghezza di banda RAM.
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <omp.h>
+
+#include "data.h"
 
 #ifdef _WIN32
     #include <windows.h>
@@ -80,20 +81,8 @@ double get_time() {
        return t.tv_sec + t.tv_nsec / 1e9;
     }
 #endif
-
-/*
-#define NODES   4039
-#define EDGES   176468
 #define DAMPING 0.85
 #define err     0.00001
-#define FILEPATH "../dataset/data1.dat"
-*/
-#define NODES 685230
-#define EDGES 7600595
-#define DAMPING 0.85
-#define err     0.00001
-#define FILEPATH "../pagerank/dataset/data2.dat"
-
 
 double sqrt(double x);
 
@@ -103,6 +92,13 @@ int main(int argc, char *argv[])
     printf("Program start\n");
 
     omp_set_num_threads(4);
+
+    GraphType graph_type = GRAPH_BIGGEST;
+    const Graph* graph = get_graph(graph_type);
+
+    const int NODES = graph->nodes;
+    const int EDGES = graph->edges;
+    const char* FILEPATH = graph->filepath;
 
     FILE *fp;
     int colindex, link, i, j = 0, col, colmatch = 0, localsum = 0;

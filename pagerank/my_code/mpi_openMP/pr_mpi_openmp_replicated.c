@@ -12,13 +12,15 @@
 /*
 # PageRank Ibrido (MPI + OpenMP) - Versione Ottimizzata a Grana Grossa
 
-Questa versione implementa il calcolo del PageRank distribuito su grafi diretti, combinando **MPI** per il calcolo distribuito tra i nodi e **OpenMP** per il parallelismo a memoria condivisa all'interno di ogni nodo.
+Questa versione implementa il calcolo del PageRank distribuito su grafi diretti, combinando **MPI** per il calcolo
+distribuito tra i nodi e **OpenMP** per il parallelismo a memoria condivisa all'interno di ogni nodo.
 
-L'architettura è fortemente orientata alle prestazioni, minimizzando l'overhead di sincronizzazione, sovrapponendo comunicazione e calcolo, ed eliminando i colli di bottiglia seriali.
+L'architettura è fortemente orientata alle prestazioni, minimizzando l'overhead di sincronizzazione,
+sovrapponendo comunicazione e calcolo, ed eliminando i colli di bottiglia seriali.
 
 ---
 
-## 🚀 Ottimizzazioni Chiave Implementate
+## Ottimizzazioni Chiave Implementate
 
 1. **Regione Parallela a Grana Grossa (Coarse-Grained)**
    * Il costrutto `#pragma omp parallel` viene aperto **una sola volta** prima del ciclo `do-while`.
@@ -41,7 +43,7 @@ L'architettura è fortemente orientata alle prestazioni, minimizzando l'overhead
 
 ---
 
-## ⚙️ Flusso di Esecuzione dell'Iterazione (Ciclo `do-while`)
+## ⚙ Flusso di Esecuzione dell'Iterazione (Ciclo `do-while`)
 
 All'interno della regione parallela fissa, il lavoro è diviso in 7 blocchi sequenziali orchestrati tra i thread OpenMP e il thread Master per le chiamate MPI:
 
@@ -55,16 +57,7 @@ All'interno della regione parallela fissa, il lavoro è diviso in 7 blocchi sequ
 
 ---
 
-## 💻 Istruzioni di Esecuzione
-
-Il programma legge automaticamente il numero di thread come primo argomento della riga di comando. Se non specificato, utilizzerà il numero massimo di thread disponibili sulla macchina.
-
-**Compilazione (Esempio con CMake/Make):**
-```bash
-mpicc -O3 -fopenmp -o pagerank_hybrid pr_mpi_openmp_distributed.c -lm
-
 */
-
 
 #include <stdio.h>
 #include <math.h>
@@ -73,46 +66,24 @@ mpicc -O3 -fopenmp -o pagerank_hybrid pr_mpi_openmp_distributed.c -lm
 #include <mpi.h>
 #include <omp.h>
 
-
-#define NODES 685230
-#define EDGES 7600595
-#define FILEPATH "pagerank/dataset/data2.dat"
-
-/*
- *PER RUNNARE PRIMA SETTARE NUMERO THREAD COME ARGOMENTO DA PASSARE AL MAIN
- *ESEMPIO 3 Processi MPI x 2 Thread
-mpiexec -n 3 ".\cmake-build-debug\pr_mpi_openmp_distributed.exe" 2
-*/
-
-//#define FILEPATH "../pagerank/dataset/data2.dat"
-
-/*
-    * Per eseguire da riga di comando e settare più processi, ad esempio 4
-    * mpiexec -n 4 ".\cmake-build-debug\pr_mpi_OpenMP4.exe"
-*/
-// path da usare quando runni da riga di comando
-
-
-
-// PER TEST CORRETTEZZA
-/*
-#define NODES 6
-#define EDGES 19
-#define FILEPATH "pagerank/dataset/data0.dat"
-*/
-
-/*
-#define NODES 4039
-#define EDGES 176468
-#define FILEPATH "pagerank/dataset/data1.dat"
-*/
+#include "data.h"
 
 #define MASTER 0
 #define DAMPING 0.85
 #define ERROR 0.00001
 
+//  mpiexec -n 3 ".\cmake-build-debug\pr_mpi_openmp_replicated.exe" 2
+
 int main(int argc, char **argv)
 {
+
+    GraphType graph_type = GRAPH_BIGGEST;
+    const Graph* graph = get_graph(graph_type);
+
+    const int NODES = graph->nodes;
+    const int EDGES = graph->edges;
+    const char* FILEPATH = graph->filepath;
+
     int NPROC, rank, num_threads;
     // Se l'utente passa un argomento extra, lo usiamo come numero di thread
     if (argc > 1) {
@@ -320,7 +291,6 @@ int main(int argc, char **argv)
     double t_allreduce_prnew = 0.0, t_update = 0.0, t_norm = 0.0;
 
     // --- CONFIGURAZIONE STRUTTURE PER PRIVATIZZAZIONE OPENMP (No MPI) ---
-    // Creiamo un array di puntatori condiviso: conterrà il vettore sum di ogni thread
     //int actual_threads = num_threads;
     double **thread_sums = (double**)calloc(num_threads,  sizeof(double*));
     // ============================================================================================================

@@ -157,30 +157,10 @@ sincronizzazione implicita bloccante. Vengono usate solo per il benchmarking rig
 #include <stdlib.h>
 #include <mpi.h>
 
-#define NODES 685230
-#define EDGES 7600595
-
-//#define FILEPATH "../pagerank/dataset/data2.dat"
-
+#include "data.h"
 /*
  * Per eseguire da riga di comando e settare più processi, ad esempio 4
  * mpiexec -n 4 ".\cmake-build-debug\pr_mpi.exe"
-*/
-// path da usare quando runni da riga di comando
-#define FILEPATH "pagerank/dataset/data2.dat"
-
-
-// PER TEST CORRETTEZZA
-/*
-#define NODES 6
-#define EDGES 19
-#define FILEPATH "pagerank/dataset/data0.dat"
-*/
-
-/*
-#define NODES 4039
-#define EDGES 176468
-#define FILEPATH "../pagerank/dataset/data1.dat"
 */
 
 #define MASTER 0
@@ -199,6 +179,13 @@ int main(int argc, char *argv[])
         printf("Program start\n");
         printf("Number of processes %d\n", NPROC);
     }
+
+    GraphType graph_type = GRAPH_BIGGEST;
+    const Graph* graph = get_graph(graph_type);
+
+    const int NODES = graph->nodes;
+    const int EDGES = graph->edges;
+    const char* FILEPATH = graph->filepath;
 
     FILE *fp;
     int colindex, link, i, j = 0, k, col, colmatch = -1, localsum = 0;

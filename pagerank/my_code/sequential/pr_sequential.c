@@ -1,9 +1,10 @@
 
-
+// gcc.exe "C:\Users\UTENTE\Desktop\Calcolo Parallelo\Ipotesi Progetto\Pagerank\pagerank\my_code\sequential\pr_sequential.c" "C:\Users\UTENTE\Desktop\Calcolo Parallelo\Ipotesi Progetto\Pagerank\pagerank\my_code\configuration\data.c"  -o pr_sequential -Iconfiguration
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../configuration/data.h"
 
 #ifdef _WIN32
     #include <windows.h>
@@ -21,34 +22,24 @@ double get_time() {
        return t.tv_sec + t.tv_nsec / 1e9;
     }
 #endif
-// PER TEST CORRETTEZZA
-/*
-#define NODES 6
-#define EDGES 19
-#define FILEPATH "../dataset/data0.dat"
-*/
 
-
-#define NODES 685230
-#define EDGES 7600595
-#define FILEPATH "../dataset/data2.dat"
-
-
-/*
-#define NODES 4039
-#define EDGES 176468
-#define FILEPATH "../dataset/data1.dat"
-*/
+#include "../configuration/data.h"
 
 #define DAMPING 0.85
 #define ERR     0.00001
-
 
 double sqrt(double x);
 
 int main(int argc, char *argv[])
 {
     printf("Program start\n");
+
+    GraphType graph_type = GRAPH_BIGGEST;
+    const Graph* graph = get_graph(graph_type);
+
+    const int NODES = graph->nodes;
+    const int EDGES = graph->edges;
+    const char* FILEPATH = graph->filepath;
 
     FILE *fp;
     int colindex, link, i, j = 0, col, colmatch = 0, localsum = 0;
@@ -87,36 +78,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Errore: impossibile aprire il file'%s'\n", filename);
         return 1;
     }
-/*
-    for (i = 0; i < EDGES; i++) {
-        if (fscanf(fp, "%d %d", &colindex, &link) != 2) {
-            fprintf(stderr, "Errore lettura file alla riga %d\n", i + 1);
-            fclose(fp);
-            return 1;
-        }
 
-        colindex = colindex - 1;
-        link     = link - 1;
-        rowind[i] = link;
-
-        if (colmatch == colindex) {
-            localsum += 1;
-        } else {
-            sum[j]       = localsum;
-            colptr[j + 1] = colptr[j] + localsum;
-            localsum     = 1;
-            j           += 1;
-            colmatch     = colindex;
-        }
-        val[i] = 1.0;
-    }
-
-    sum[j]      = localsum;
-    colptr[j + 1] = EDGES;
-    fclose(fp);
-*/
-
-    // === NUOVO PARSER SEQUENZIALE ROBUSTO (Allineato a MPI) ===
+    // === NUOVO PARSER SEQUENZIALE ROBUSTO PER GESTIONE DEI POZZI ===
     localsum = 0;
     colmatch = -1;
 
@@ -165,7 +128,7 @@ int main(int argc, char *argv[])
         }
         index += co;
     }
-
+/*
    printf("\n======================= CSC construction complete ==========================\n");
     printf("\n--- VERIFICA COSTRUZIONE CSC ---\n");
     printf("COLPTR: ");
@@ -175,7 +138,7 @@ int main(int argc, char *argv[])
     printf("\nVAL:    ");
     for (int c = 0; c < EDGES; c++) printf("%.2f ", val[c]);
     printf("\n============================================================================\n");
-
+*/
 
 //===================================================================================================================
    // POWER ITERATION (Calcolo del PageRank)
@@ -273,11 +236,13 @@ int main(int argc, char *argv[])
    printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
    printf("=============================================\n");
 
+    /*
     printf("\n--- VETTORE PAGERANK FINALE ---\n");
     for (int i = 0; i < NODES; i++) {
         printf("Nodo %d: %.6f\n", i + 1, prnew[i]);
     }
     printf("=============================================\n");
+*/
 
     free(val);
     free(rowind);

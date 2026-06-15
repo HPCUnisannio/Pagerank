@@ -13,39 +13,12 @@
 #include <mpi.h>
 #include <omp.h>
 
-
-#define NODES 685230
-#define EDGES 7600595
-#define FILEPATH "pagerank/dataset/data2.dat"
-
 /*
  *PER RUNNARE PRIMA SETTARE NUMERO THREAD COME ARGOMENTO DA PASSARE AL MAIN
  *ESEMPIO 3 Processi MPI x 2 Thread
 mpiexec -n 3 ".\cmake-build-debug\pr_mpi_OpenMP3.exe" 2
 */
-
-//#define FILEPATH "../pagerank/dataset/data2.dat"
-
-/*
-    * Per eseguire da riga di comando e settare più processi, ad esempio 4
-    * mpiexec -n 4 ".\cmake-build-debug\pr_mpi_OpenMP4.exe"
-*/
-// path da usare quando runni da riga di comando
-
-
-
-// PER TEST CORRETTEZZA
-/*
-#define NODES 6
-#define EDGES 19
-#define FILEPATH "pagerank/dataset/data0.dat"
-*/
-
-/*
-#define NODES 4039
-#define EDGES 176468
-#define FILEPATH "pagerank/dataset/data1.dat"
-*/
+#include "data.h"
 
 #define MASTER 0
 #define DAMPING 0.85
@@ -81,7 +54,12 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
+    GraphType graph_type = GRAPH_BIGGEST;
+    const Graph* graph = get_graph(graph_type);
 
+    const int NODES = graph->nodes;
+    const int EDGES = graph->edges;
+    const char* FILEPATH = graph->filepath;
 
     FILE *fp;
     int colindex, link, i, j = 0, col, colmatch = -1, localsum = 0;
