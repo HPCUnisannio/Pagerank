@@ -1,3 +1,6 @@
+// Command to compile:
+// gcc -fopenmp -O2 -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c libraries/data.c libraries/measure.c -Ilibraries -lm// command to run:
+// ./openmp/pr_openmp_opt 4
 /*
 ================================================================================
 # 🏆 APPROCCIO C: PRIVATIZZAZIONE MEMORIA (ZERO-ATOMIC)
@@ -63,24 +66,9 @@ la parallelizzazione del calcolo senza saturare la larghezza di banda RAM.
 #include <string.h>
 #include <omp.h>
 
-#include "data.h"
+#include "../libraries/data.h"
+#include "../libraries/measure.h"
 
-#ifdef _WIN32
-    #include <windows.h>
-    double get_time() {
-       LARGE_INTEGER t, f;
-       QueryPerformanceCounter(&t);
-       QueryPerformanceFrequency(&f);
-       return (double)t.QuadPart / f.QuadPart;
-    }
-#else
-#include <time.h>
-double get_time() {
-       struct timespec t;
-       clock_gettime(CLOCK_MONOTONIC, &t);
-       return t.tv_sec + t.tv_nsec / 1e9;
-    }
-#endif
 #define DAMPING 0.85
 #define err     0.00001
 
@@ -91,9 +79,16 @@ int main(int argc, char *argv[])
 
     printf("Program start\n");
 
-    omp_set_num_threads(4);
+    // Parse number of threads from command line, default to 4
+    int num_threads = 4;
+    if (argc > 1) {
+        num_threads = atoi(argv[1]);
+        if (num_threads < 1) num_threads = 1;
+    }
+    omp_set_num_threads(num_threads);
+    printf("Using %d threads\n", num_threads);
 
-    GraphType graph_type = GRAPH_BIGGEST;
+    GraphType graph_type = GRAPH_MEDIUM;
     const Graph* graph = get_graph(graph_type);
 
     const int NODES = graph->nodes;
@@ -102,7 +97,7 @@ int main(int argc, char *argv[])
 
     FILE *fp;
     int colindex, link, i, j = 0, col, colmatch = 0, localsum = 0;
-    int co, index;
+    int co, index, t;
 
     double *val    = (double *) calloc(EDGES,       sizeof(double));
     int    *rowind = (int *)    calloc(EDGES,        sizeof(int));
@@ -135,7 +130,7 @@ int main(int argc, char *argv[])
     }
     printf("initialization complete\n");
 
-    const char *filename = (argc > 1) ? argv[1] : FILEPATH;
+    const char *filename = FILEPATH;
     fp = fopen(filename, "r");
     if (!fp) {
         fprintf(stderr, "Errore: impossibile aprire il file'%s'\n", filename);
@@ -181,7 +176,8 @@ int main(int argc, char *argv[])
 
    for (col = 0; col < NODES; col++) {
       double col_sum = 0.0;
-      for (int k = colptr[col]; k < colptr[col + 1]; k++) {
+      int k;
+      for (k = colptr[col]; k < colptr[col + 1]; k++) {
          col_sum += val[k];
       }
    }
@@ -194,9 +190,9 @@ int main(int argc, char *argv[])
     //===========================================================================
     // PREPARAZIONE: ALLOCAZIONE DELLA MEMORIA PRIVATA PER THREAD
     //===========================================================================
-    int num_threads = omp_get_max_threads();
-    double **local_prnew = (double **)malloc(num_threads * sizeof(double *));
-    for (int t = 0; t < num_threads; t++) {
+    num_threads = omp_get_max_threads();
+    double **local_prnew = (double **)malloc(num_threads * sizeof(double *));    
+    for (t = 0; t < num_threads; t++) {
         local_prnew[t] = (double *)calloc(NODES, sizeof(double));
     }
 
@@ -279,7 +275,7 @@ int main(int argc, char *argv[])
 
 
    double sum_pr=0;
-   for(int i=0;i<NODES;i++) sum_pr+=prnew[i];
+   for(i=0;i<NODES;i++) sum_pr+=prnew[i];
    printf("Somma PR = %.10f\n", sum_pr);
 
 
@@ -295,7 +291,7 @@ int main(int argc, char *argv[])
     free(sum);
 
     // Liberazione memoria privata
-    for (int t = 0; t < num_threads; t++) {
+    for (t = 0; t < num_threads; t++) {
         free(local_prnew[t]);
     }
     free(local_prnew);
