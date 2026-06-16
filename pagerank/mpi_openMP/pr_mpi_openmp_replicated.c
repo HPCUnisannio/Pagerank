@@ -1,3 +1,7 @@
+// Command to compile:
+// mpicc mpi_openMP/pr_mpi_openmp_replicated.c libraries/data.c libraries/measure.c -o mpi_openMP/pr_mpi_openmp_replicated -Ilibraries -fopenmp -lm
+// To run with 4 processes:
+// mpirun -np 4 -machinefile mpi_openMP/machinefile.txt mpi_openMP/pr_mpi_openmp_replicated 2
 
 /*
  * CONFIGURAZIONE CON REGIONE PARALLALE A GRANA GROSSA
@@ -7,7 +11,7 @@
  * ASINCRONIA PER OVERLAP TRA COMUNICAZIONE E CALCOLO DELLA DAMPLING MASS
  * RIMOZIONE DELLA DISTRIBUZIONE DELLE COLONNE TRA PROCESSI(RIDONDANTE)
  *
-*/
+ */
 
 /*
 # PageRank Ibrido (MPI + OpenMP) - Versione Ottimizzata a Grana Grossa
@@ -49,7 +53,7 @@ All'interno della regione parallela fissa, il lavoro è diviso in 7 blocchi sequ
 
 * **Blocco 1 (Reset):** Azzeramento locale degli array privati dei thread e degli accumulatori.
 * **Blocco 2 (SpMV):** Calcolo parallelo del prodotto matrice-vettore. Ogni thread legge le colonne assegnate al proprio processo e scrive sul proprio vettore di output privato.
-* **Blocco 3 (Riduzione Thread):** I thread sommano i propri vettori parziali dentro il vettore `sum` del processo locale sfruttando la vettorizzazione (`#pragma omp for simd`).
+* **Blocco 3 (Riduzione Thread):** I thread sommano i propri vettori parziali dentro il vettore `sum` del processo locale (`#pragma omp for`).
 * **Blocco 4 (Invio Rete):** Il thread Master avvia la `MPI_Iallreduce` asincrona per sommare i vettori `sum` di tutti i processi nel vettore `prnew`.
 * **Blocco 5 (Overlap e Dangling Mass):** Mentre la rete lavora, i thread calcolano la *dangling mass* locale sui nodi di propria competenza. Segue una rapida `MPI_Allreduce` per sommare i valori e una barriera d'attesa (`MPI_Wait`) per garantire l'arrivo completo di `prnew`.
 * **Blocco 6 (Update Distribuito):** Ogni processo aggiorna $PR_{new}$ applicando damping e redistribuzione **solo sui propri nodi**, per poi aggiornare in-place $PR_{old}$ e calcolare il delta di scarto al quadrato (Norma locale).
@@ -66,7 +70,8 @@ All'interno della regione parallela fissa, il lavoro è diviso in 7 blocchi sequ
 #include <mpi.h>
 #include <omp.h>
 
-#include "data.h"
+#include "../libraries/data.h"
+#include "../libraries/measure.h"
 
 #define MASTER 0
 #define DAMPING 0.85
@@ -77,30 +82,32 @@ All'interno della regione parallela fissa, il lavoro è diviso in 7 blocchi sequ
 int main(int argc, char **argv)
 {
 
-    GraphType graph_type = GRAPH_BIGGEST;
-    const Graph* graph = get_graph(graph_type);
+    GraphType graph_type = GRAPH_MEDIUM;
+    const Graph *graph = get_graph(graph_type);
 
     const int NODES = graph->nodes;
     const int EDGES = graph->edges;
-    const char* FILEPATH = graph->filepath;
+    const char *FILEPATH = graph->filepath;
 
     int NPROC, rank, num_threads;
     // Se l'utente passa un argomento extra, lo usiamo come numero di thread
-    if (argc > 1) {
+    if (argc > 1)
+    {
         num_threads = atoi(argv[1]);
         omp_set_num_threads(num_threads);
-    } else
+    }
+    else
     {
         num_threads = omp_get_max_threads();
     }
-
 
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &NPROC);
 
     // 2. Stampa delle informazioni di setup (Solo MASTER)
-    if (rank == 0) { // Usa 'MASTER' se hai definito una macro per lo 0
+    if (rank == 0)
+    { // Usa 'MASTER' se hai definito una macro per lo 0
         printf("\n=============================================\n");
         printf(" AVVIO PAGERANK IBRIDO [ MPI(post processing distribuito simmetrico) + OpenMP(grana grossa + privatizzazione + master thread) ]\n");
         printf("=============================================\n");
@@ -112,59 +119,62 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-
-
     FILE *fp;
-    int colindex, link, i, j = 0, col, colmatch = -1, localsum = 0;
+    int colindex, link, i, j = 0, col, c, colmatch = -1, localsum = 0;
     int co, index;
 
     // Allocazione strutture principali
-    double * val = (double*)calloc(EDGES, sizeof(double));
-    int * rowind =(int*)calloc(EDGES, sizeof(int));
-    int * colptr = (int*)calloc(NODES + 1, sizeof(int));
-    int * readsum = (int*)calloc(NODES, sizeof(int));
+    double *val = (double *)calloc(EDGES, sizeof(double));
+    int *rowind = (int *)calloc(EDGES, sizeof(int));
+    int *colptr = (int *)calloc(NODES + 1, sizeof(int));
+    int *readsum = (int *)calloc(NODES, sizeof(int));
 
-    double * prold = (double*)malloc(NODES * sizeof(double));
-    double * prnew = (double*)calloc(NODES, sizeof(double));
+    double *prold = (double *)malloc(NODES * sizeof(double));
+    double *prnew = (double *)calloc(NODES, sizeof(double));
 
     // double * damp1 = (double*)malloc(NODES * sizeof(double));
-    //double * damp2 = (double*)malloc(NODES * sizeof(double));
-    //double * diff = (double*)calloc(NODES, sizeof(double));
+    // double * damp2 = (double*)malloc(NODES * sizeof(double));
+    // double * diff = (double*)calloc(NODES, sizeof(double));
     // Al posto delle 2 malloc e del loop di inizializzazione
     const double DAMP1 = DAMPING;
     const double DAMP2 = (1.0 - DAMPING) / NODES;
 
-    double * sum = (double*)calloc(NODES, sizeof(double));
+    double *sum = (double *)calloc(NODES, sizeof(double));
 
     int *sendcnts = malloc(sizeof(int) * NPROC);
     int *displs = malloc(sizeof(int) * NPROC);
-    int *pcols = (int*)malloc(NPROC * sizeof(int));
-    int *displs_pr = (int*)malloc(NPROC * sizeof(int));
+    int *pcols = (int *)malloc(NPROC * sizeof(int));
+    int *displs_pr = (int *)malloc(NPROC * sizeof(int));
 
     int rec_col;
 
     // Inizializzazione vettori
-    for(i = 0; i < NODES; i++) {
+    for (i = 0; i < NODES; i++)
+    {
         prold[i] = 1.0 / NODES;
-        //damp1[i] = DAMPING;
-        //damp2[i] = (1.0 - DAMPING) / NODES;
+        // damp1[i] = DAMPING;
+        // damp2[i] = (1.0 - DAMPING) / NODES;
     }
 
-    if (rank == MASTER) {
+    if (rank == MASTER)
+    {
         printf("Initialization complete\n");
     }
 
     // Lettura file
     fp = fopen(FILEPATH, "r");
-    if (fp == NULL) {
+    if (fp == NULL)
+    {
         fprintf(stderr, "Rank %d - Errore: impossibile aprire il file '%s'\n", rank, FILEPATH);
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
     // --- FIX 1: Lettura robusta a prova di "Dangling Nodes" ---
     localsum = 0;
-    for(i = 0; i < EDGES; i++) {
-        if (fscanf(fp, "%d %d", &colindex, &link) != 2) {
+    for (i = 0; i < EDGES; i++)
+    {
+        if (fscanf(fp, "%d %d", &colindex, &link) != 2)
+        {
             fprintf(stderr, "Rank %d - Errore lettura file alla riga %d\n", rank, i + 1);
             fclose(fp);
             MPI_Abort(MPI_COMM_WORLD, 1);
@@ -173,14 +183,20 @@ int main(int argc, char **argv)
         link = link - 1;
         rowind[i] = link;
 
-        if (i == 0) {
+        if (i == 0)
+        {
             colmatch = colindex;
             localsum = 1;
-        } else if (colmatch == colindex) {
+        }
+        else if (colmatch == colindex)
+        {
             localsum += 1;
-        } else {
+        }
+        else
+        {
             readsum[colmatch] = localsum;
-            for(int c = colmatch + 1; c <= colindex; c++) {
+            for (c = colmatch + 1; c <= colindex; c++)
+            {
                 colptr[c] = colptr[colmatch] + localsum;
             }
             localsum = 1;
@@ -188,9 +204,11 @@ int main(int argc, char **argv)
         }
         val[i] = 1.0;
     }
-    if (EDGES > 0) {
+    if (EDGES > 0)
+    {
         readsum[colmatch] = localsum;
-        for (int c = colmatch + 1; c <= NODES; c++) {
+        for (c = colmatch + 1; c <= NODES; c++)
+        {
             colptr[c] = EDGES;
         }
     }
@@ -198,15 +216,18 @@ int main(int argc, char **argv)
 
     // Normalizzazione della matrice CSC
     index = 0;
-    for(i = 0; i < NODES; i++) {
+    for (i = 0; i < NODES; i++)
+    {
         co = readsum[i];
-        for(j = index; j < index + co; j++) {
+        for (j = index; j < index + co; j++)
+        {
             val[j] = val[j] / co;
         }
         index += co;
     }
 
-    if (rank == MASTER) {
+    if (rank == MASTER)
+    {
         printf("val, rowind and colptr have been populated\n");
         /*
                 printf("\n======================= CSC construction complete ==========================\n");
@@ -222,26 +243,33 @@ int main(int argc, char **argv)
     }
 
     // Calcolo della distribuzione delle colonne tra i processi
-    for(i = 0; i < NPROC; i++) {
-        if(i == 0) {
+    for (i = 0; i < NPROC; i++)
+    {
+        if (i == 0)
+        {
             pcols[i] = NODES / NPROC + NODES % NPROC;
             displs_pr[i] = 0;
-        } else {
+        }
+        else
+        {
             pcols[i] = NODES / NPROC;
-            displs_pr[i] = pcols[i-1] + displs_pr[i-1];
+            displs_pr[i] = pcols[i - 1] + displs_pr[i - 1];
         }
     }
 
     // Calcolo dei conteggi di elementi non-zero (sendcnts) e relativi spiazzamenti (displs)
     j = 0;
-    for(i = 0; i < NPROC; i++) {
+    for (i = 0; i < NPROC; i++)
+    {
         j = j + pcols[i];
         int k = j - pcols[i];
         sendcnts[i] = colptr[j] - colptr[k];
-        if (i == 0) {
+        if (i == 0)
+        {
             displs[i] = 0;
-        } else
-            displs[i] = sendcnts[i-1] + displs[i-1];
+        }
+        else
+            displs[i] = sendcnts[i - 1] + displs[i - 1];
     }
 
     // Allocazione dei buffer di ricezione locali per lo Scatterv
@@ -270,11 +298,10 @@ int main(int argc, char **argv)
     memcpy(rec_row, rowind + displs[rank], sendcnts[rank] * sizeof(int));
     */
     double *rec_val = val + displs[rank];
-    int    *rec_row = rowind + displs[rank];
+    int *rec_row = rowind + displs[rank];
     rec_col = pcols[rank];
 
     double begin = MPI_Wtime();
-
 
     // Variabili Shared tra i thread della successiva regione parallela
     double norm = 0.0; // norma globale
@@ -285,23 +312,22 @@ int main(int argc, char **argv)
     // norma quadrata locale(calcolata in parallelo da tutti i thread del processo, poi sommata con reduction)
     double norm_sq_local = 0.0;
 
-
     // VARIABILI PER MISURAZIONE TEMPO COMUNICAZIONE VS CALCOLO
     double t_spmv = 0.0, t_thread_red = 0.0, t_allreduce_dm = 0.0;
     double t_allreduce_prnew = 0.0, t_update = 0.0, t_norm = 0.0;
 
     // --- CONFIGURAZIONE STRUTTURE PER PRIVATIZZAZIONE OPENMP (No MPI) ---
-    //int actual_threads = num_threads;
-    double **thread_sums = (double**)calloc(num_threads,  sizeof(double*));
+    // int actual_threads = num_threads;
+    double **thread_sums = (double **)calloc(num_threads, sizeof(double *));
     // ============================================================================================================
     // REGIONE PARALLELA A GRANA GROSSA --> CREIAMO QUI UNA SOLA VOLTA IL POOL DI THREAD
     // ============================================================================================================
-#pragma omp parallel private(i, j)
+    #pragma omp parallel private(i, j)
     {
 
         // Ogni thread alloca una volta sola il proprio vettore sum privato sulla Heap
         int tid = omp_get_thread_num();
-        thread_sums[tid] = (double*)calloc(NODES, sizeof(double));
+        thread_sums[tid] = (double *)calloc(NODES, sizeof(double));
         double *local_sum = thread_sums[tid];
 
         // t_phase è privata per thread, ma solo thread 0 la usa in blocchi master
@@ -318,29 +344,33 @@ int main(int argc, char **argv)
             // reset delle variabili locali per il calcolo della dangling mass e della norma viene fatto
             // da un solo thread, il master, gli altri vedranno quindi i valori azzerati essendo queste
             // variabili condivise
-#pragma omp master
+            #pragma omp master
             {
                 dm_local = 0.0;
                 norm_sq_local = 0.0;
             }
-
 
             // --- BLOCCO 2: SpMV CALCOLO PARALLELO MATRICE x VETTORE ---
             // Ogni processo usa prold[global_col] direttamente invece di rec_pr che riceveva —> no Scatterv
             int global_col_start = displs_pr[rank];
 
             // master per test temporale
-#pragma omp master
-            { t_phase = MPI_Wtime(); }
+            #pragma omp master
+            {
+                t_phase = MPI_Wtime();
+            }
 
-#pragma omp for schedule(dynamic, 512)
-            for (int local_col = 0; local_col < rec_col; local_col++) {
+            int local_col;
+            #pragma omp for schedule(dynamic, 512)
+            for (local_col = 0; local_col < rec_col; local_col++)
+            {
                 int global_col = global_col_start + local_col;
                 int start_idx = colptr[global_col] - displs[rank];
-                int end_idx   = colptr[global_col + 1] - displs[rank];
+                int end_idx = colptr[global_col + 1] - displs[rank];
 
-                for (j = start_idx; j < end_idx; j++) {
-                    //local_sum[rec_row[j]] += rec_val[j] * rec_pr[local_col];
+                for (j = start_idx; j < end_idx; j++)
+                {
+                    // local_sum[rec_row[j]] += rec_val[j] * rec_pr[local_col];
                     local_sum[rec_row[j]] += rec_val[j] * prold[global_col]; // usiamo direttamente prold
                 }
             } // [BARRIERA 1 Implicita]
@@ -348,36 +378,43 @@ int main(int argc, char **argv)
             // prima di procedere alla riduzione
 
             // master per test temporale
-#pragma omp master
-            { t_spmv += MPI_Wtime() - t_phase; }
-
+            #pragma omp master
+            {
+                t_spmv += MPI_Wtime() - t_phase;
+            }
 
             // --- BLOCCO 3: RIDUZIONE PARALLELA DEI THREAD SUM -> SUM GLOBALE ---
 
-            //master per test temporale
-#pragma omp master
-{ t_phase = MPI_Wtime(); }
+            // master per test temporale
+            #pragma omp master
+            {
+                t_phase = MPI_Wtime();
+            }
 
-#pragma omp for simd
-            for(i = 0; i < NODES; i++)
+            #pragma omp for
+            for (i = 0; i < NODES; i++)
             {
                 double total_row_sum = 0.0;
-                for(int t = 0; t < num_threads; t++) {
-                    if(thread_sums[t] != NULL)
+                int t;
+                for (t = 0; t < num_threads; t++)
+                {
+                    if (thread_sums[t] != NULL)
                         total_row_sum += thread_sums[t][i];
                 }
                 sum[i] = total_row_sum;
             } // [BARRIERA 2 Implicita]
 
             // master per test temporale
-#pragma omp master
-            { t_thread_red += MPI_Wtime() - t_phase; }
+            #pragma omp master
+            {
+                t_thread_red += MPI_Wtime() - t_phase;
+            }
 
             // --- BLOCCO 4: RIDUZIONE MPI COLLETTIVA ASINCRONA) ---
             MPI_Request request;
-#pragma omp master
+            #pragma omp master
             {
-                t_phase = MPI_Wtime();  // inizia a contare da qui
+                t_phase = MPI_Wtime(); // inizia a contare da qui
                 // Facciamo una riduzione globale in background in modo tale che tutti ricevano prnew "grezzo"
                 MPI_Iallreduce(sum, prnew, NODES, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &request);
             }
@@ -386,16 +423,18 @@ int main(int argc, char **argv)
             // FASE DI POST PROCESSING DISTRIBUITA TRA TUTTI I PROCESSI
             // --- BLOCCO 5: OVERLAP CALCOLO DANGLING MASS PER GESTIRE I NODI POZZI
             // Calcoliamo la quota locale di dangling mass basandoci solo sulle NOSTRE colonne
-#pragma omp for simd reduction(+:dm_local)
-            for(i = 0; i < rec_col; i++) {
+            #pragma omp for reduction(+ : dm_local)
+            for (i = 0; i < rec_col; i++)
+            {
                 int global_col = global_col_start + i;
-                if (readsum[global_col] == 0) {
+                if (readsum[global_col] == 0)
+                {
                     dm_local += prold[global_col];
                 }
             } // [BARRIERA 3 Implicita]
 
             // Sommiamo le dangling mass locali di tutti i processi (Sincronizzazione scalare velocissima)
-#pragma omp master
+            #pragma omp master
             {
                 MPI_Allreduce(&dm_local, &dm_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
                 //  Attendere che finisca la comunicazione
@@ -405,7 +444,7 @@ int main(int argc, char **argv)
                 // Nota: t_allreduce_prnew misura il tempo TOTALE del blocco 4+5
                 // cioè: max(Iallreduce, dm_locale+allreduce_dm) — il vero overlap
             }
-#pragma omp barrier // [BARRIERA 4 Esplicita]
+            #pragma omp barrier // [BARRIERA 4 Esplicita]
             // Dobbiamo aspettare che tutti i processi abbiamo prnew completo e la dangling mass globale,
             // poi possiamo procedere con l'aggiornamento e il calcolo della norma
 
@@ -417,12 +456,15 @@ int main(int argc, char **argv)
             // Invece di fare NODES iterazioni, gestisce solo le colonne che ha trattato nel calcolo
 
             // master per test temporale
-#pragma omp master
-            { t_phase = MPI_Wtime(); }
+            #pragma omp master
+            {
+                t_phase = MPI_Wtime();
+            }
 
             // damping + aggiornamento prold + norma
-#pragma omp for simd reduction(+:norm_sq_local)
-            for(i = 0; i < rec_col; i++) {
+            #pragma omp for reduction(+ : norm_sq_local)
+            for (i = 0; i < rec_col; i++)
+            {
                 int global_col = global_col_start + i;
 
                 // Aggiorniamo prnew e prold solo per la nostra porzione
@@ -435,26 +477,25 @@ int main(int argc, char **argv)
             } // [BARRIERA 5 Implicita]
 
             // master per test temporale
-#pragma omp master
-            { t_update += MPI_Wtime() - t_phase; }
+            #pragma omp master
+            {
+                t_update += MPI_Wtime() - t_phase;
+            }
 
             // --- BLOCCO 7: CALCOLO DELLA NORMA GLOBALE
-#pragma omp master
-{
-    t_phase = MPI_Wtime();
-    // Sommiamo le norme locali di tutti i processi (Sincronizzazione scalare velocissima)
-    double norm_sq_global = 0.0;
-    MPI_Allreduce(&norm_sq_local, &norm_sq_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-    norm = sqrt(norm_sq_global);
-    t_norm += MPI_Wtime() - t_phase;
-}
-#pragma omp barrier //[BARRIERA 6 Esplicita] Attendere la norma per poter proseguire
+            #pragma omp master
+            {
+                t_phase = MPI_Wtime();
+                // Sommiamo le norme locali di tutti i processi (Sincronizzazione scalare velocissima)
+                double norm_sq_global = 0.0;
+                MPI_Allreduce(&norm_sq_local, &norm_sq_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+                norm = sqrt(norm_sq_global);
+                t_norm += MPI_Wtime() - t_phase;
+            }
+            #pragma omp barrier //[BARRIERA 6 Esplicita] Attendere la norma per poter proseguire
             // Tutti i processi hanno ora la norma aggiornata, possono decidere se continuare o terminare l'iterazione
 
-
-
-        } while(norm > ERROR);
-
+        } while (norm > ERROR);
 
         free(local_sum);
     }
@@ -464,7 +505,8 @@ int main(int argc, char **argv)
     // ==============================================================================================================
 
     // Dopo il timing, fuori dalla regione parallela, solo il processo MASTER stampa
-    if(rank == MASTER) {
+    if (rank == MASTER)
+    {
         double t_total = t_spmv + t_thread_red + t_allreduce_prnew + t_update + t_norm;
         printf("\n--- PROFILO TEMPO (totale su tutte le iterazioni) ---\n");
         printf("  SpMV locale      : %7.3f s  (%5.1f%%)\n", t_spmv,
@@ -480,26 +522,24 @@ int main(int argc, char **argv)
         printf("  Totale misurato  : %7.3f s\n", t_total);
     }
 
-
-
-
     MPI_Barrier(MPI_COMM_WORLD);
     double end = MPI_Wtime();
     double time_spent = end - begin;
 
-
     // ===================== SEZIONE DI TEST (verifica + stampa) ==================================================
     // (puoi commentare l'intero blocco quando passi in produzione)
 
-    double *full_pr = (double*)malloc(NODES * sizeof(double));
+    double *full_pr = (double *)malloc(NODES * sizeof(double));
 
     MPI_Allgatherv(prnew + displs_pr[rank], pcols[rank], MPI_DOUBLE,
                    full_pr, pcols, displs_pr, MPI_DOUBLE,
                    MPI_COMM_WORLD);
 
-    if (rank == MASTER) {
+    if (rank == MASTER)
+    {
         double sum_pr = 0.0;
-        for (i = 0; i < NODES; i++) {
+        for (i = 0; i < NODES; i++)
+        {
             sum_pr += full_pr[i];
         }
         printf("\n=============================================\n");
@@ -521,17 +561,21 @@ int main(int argc, char **argv)
 
     // ===================== FINE SEZIONE DI TEST ================================================================
 
+    // Liberazione memoria
+    free(val);
+    free(rowind);
+    free(colptr);
+    free(readsum);
+    free(prold);
+    free(prnew);
+    free(sum);
 
+    free(sendcnts);
+    free(displs);
+    free(pcols);
+    free(displs_pr);
+    // free(rec_val); free(rec_row);
 
-
-
-        // Liberazione memoria
-        free(val); free(rowind); free(colptr); free(readsum);
-        free(prold); free(prnew); free(sum);
-
-        free(sendcnts); free(displs); free(pcols); free(displs_pr);
-        //free(rec_val); free(rec_row);
-
-        MPI_Finalize();
-        return 0;
+    MPI_Finalize();
+    return 0;
 }

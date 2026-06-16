@@ -1,3 +1,8 @@
+// Command to compile:
+// mpicc mpi_openMP/pr_mpi_openmp_centralized.c libraries/data.c libraries/measure.c -o mpi_openMP/pr_mpi_openmp_centralized -Ilibraries -fopenmp -lm
+// To run with 4 processes:
+// mpirun -np 4 -machinefile mpi_openMP/machinefile.txt mpi_openMP/pr_mpi_openmp_centralized 2
+
 /*
 PageRank Ibrido (MPI + OpenMP) - Versione ad Architettura Distribuita con I/O Centralizzato
 Questa variante del PageRank ibrido introduce un modello a memoria distribuita pura per la gestione della matrice del grafo.
@@ -40,7 +45,7 @@ L'accumulo avviene sui vettori privati local_sum per eliminare i conflitti di sc
 Infatti grazie alla privatizzazione evitiamo sezioni critiche e lock in quanto è impossibile che i thread interferiscano tra loro.
 
 Fase B (Riduzione Thread): I vettori privati dei thread vengono ridotti nel vettore sum locale al processo
-tramite istruzioni vettoriali SIMD.
+tramite `#pragma omp for`.
 
 Fase C (Overlap Rete/CPU con Iallreduce): Viene lanciata la MPI_Iallreduce asincrona sul vettore sum.
 Mentre la rete scambia i dati globali, la CPU calcola in parallelo la dangling mass locale (dm_local).
@@ -65,7 +70,9 @@ Per grafi nell'ordine di centinaia di milioni di archi, la fase di inizializzazi
 #include <mpi.h>
 #include <omp.h>
 
-#include "data.h"
+#include "../libraries/data.h"
+#include "../libraries/measure.h"
+
 #define MASTER 0
 #define DAMPING 0.85
 #define ERROR 0.00001
@@ -76,18 +83,21 @@ Per grafi nell'ordine di centinaia di milioni di archi, la fase di inizializzazi
 
 int main(int argc, char **argv)
 {
-    GraphType graph_type = GRAPH_BIGGEST;
-    const Graph* graph = get_graph(graph_type);
+    GraphType graph_type = GRAPH_MEDIUM;
+    const Graph *graph = get_graph(graph_type);
 
     const int NODES = graph->nodes;
     const int EDGES = graph->edges;
-    const char* FILEPATH = graph->filepath;
+    const char *FILEPATH = graph->filepath;
 
     int NPROC, rank, num_threads;
-    if (argc > 1) {
+    if (argc > 1)
+    {
         num_threads = atoi(argv[1]);
         omp_set_num_threads(num_threads);
-    } else {
+    }
+    else
+    {
         num_threads = omp_get_max_threads();
     }
 
@@ -95,7 +105,8 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &NPROC);
 
-    if (rank == MASTER) {
+    if (rank == MASTER)
+    {
         printf("\n=============================================\n");
         printf(" AVVIO PAGERANK IBRIDO (lettura centralizzata)\n");
         printf("=============================================\n");
@@ -106,7 +117,7 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    int i, j;
+    int i, j, c;
     int colindex, link, colmatch = -1, localsum = 0;
     int co, index;
 
@@ -115,26 +126,27 @@ int main(int argc, char **argv)
     int *rowind = NULL;
 
     // Strutture condivise per i metadati (esistono su tutti i processi)
-    int *colptr  = (int*)calloc(NODES + 1, sizeof(int));
-    int *readsum = (int*)calloc(NODES, sizeof(int));
+    int *colptr = (int *)calloc(NODES + 1, sizeof(int));
+    int *readsum = (int *)calloc(NODES, sizeof(int));
 
     // Vettori centrali dell'algoritmo
-    double *prold = (double*)malloc(NODES * sizeof(double));
-    double *prnew = (double*)calloc(NODES, sizeof(double));
-    double *sum   = (double*)calloc(NODES, sizeof(double));
+    double *prold = (double *)malloc(NODES * sizeof(double));
+    double *prnew = (double *)calloc(NODES, sizeof(double));
+    double *sum = (double *)calloc(NODES, sizeof(double));
 
     const double DAMP1 = DAMPING;
     const double DAMP2 = (1.0 - DAMPING) / NODES;
 
     // Vettori di utility per la ripartizione dei carichi MPI
-    int *sendcnts  = malloc(sizeof(int) * NPROC);
-    int *displs    = malloc(sizeof(int) * NPROC);
-    int *pcols     = malloc(NPROC * sizeof(int));
+    int *sendcnts = malloc(sizeof(int) * NPROC);
+    int *displs = malloc(sizeof(int) * NPROC);
+    int *pcols = malloc(NPROC * sizeof(int));
     int *displs_pr = malloc(NPROC * sizeof(int));
     int rec_col;
 
     // INIZIALIZZAZIONE: Tutti i processi impostano il vettore iniziale.
-    for (i = 0; i < NODES; i++) {
+    for (i = 0; i < NODES; i++)
+    {
         prold[i] = 1.0 / NODES;
     }
 
@@ -142,35 +154,46 @@ int main(int argc, char **argv)
     // 1. LETTURA E COSTRUZIONE CSC (SOLO MASTER)
     // Il master legge sequenzialmente e prepara la matrice in formato CSC.
     // ========================================================================
-    if (rank == MASTER) {
+    if (rank == MASTER)
+    {
         FILE *fp = fopen(FILEPATH, "r");
-        if (fp == NULL) {
+        if (fp == NULL)
+        {
             fprintf(stderr, "Rank %d - Errore apertura file '%s'\n", rank, FILEPATH);
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
-        val    = (double*)calloc(EDGES, sizeof(double));
-        rowind = (int*)calloc(EDGES, sizeof(int));
+        val = (double *)calloc(EDGES, sizeof(double));
+        rowind = (int *)calloc(EDGES, sizeof(int));
 
         localsum = 0;
-        for (i = 0; i < EDGES; i++) {
-            if (fscanf(fp, "%d %d", &colindex, &link) != 2) {
+        for (i = 0; i < EDGES; i++)
+        {
+            if (fscanf(fp, "%d %d", &colindex, &link) != 2)
+            {
                 fprintf(stderr, "Rank %d - Errore lettura file\n", rank);
                 fclose(fp);
                 MPI_Abort(MPI_COMM_WORLD, 1);
             }
             // Commentare per usare il dataset soc live journal il quale è già 0 indexed
-            colindex--; link--;
+            colindex--;
+            link--;
             rowind[i] = link;
 
-            if (i == 0) {
+            if (i == 0)
+            {
                 colmatch = colindex;
                 localsum = 1;
-            } else if (colmatch == colindex) {
+            }
+            else if (colmatch == colindex)
+            {
                 localsum++;
-            } else {
+            }
+            else
+            {
                 readsum[colmatch] = localsum;
-                for (int c = colmatch + 1; c <= colindex; c++) {
+                for (c = colmatch + 1; c <= colindex; c++)
+                {
                     colptr[c] = colptr[colmatch] + localsum;
                 }
                 localsum = 1;
@@ -178,9 +201,11 @@ int main(int argc, char **argv)
             }
             val[i] = 1.0;
         }
-        if (EDGES > 0) {
+        if (EDGES > 0)
+        {
             readsum[colmatch] = localsum;
-            for (int c = colmatch + 1; c <= NODES; c++) {
+            for (c = colmatch + 1; c <= NODES; c++)
+            {
                 colptr[c] = EDGES;
             }
         }
@@ -188,54 +213,65 @@ int main(int argc, char **argv)
 
         // Normalizzazione (pesi degli archi)
         index = 0;
-        for (i = 0; i < NODES; i++) {
+        for (i = 0; i < NODES; i++)
+        {
             co = readsum[i];
-            for (j = index; j < index + co; j++) val[j] /= co;
+            for (j = index; j < index + co; j++)
+                val[j] /= co;
             index += co;
         }
-        if (rank == MASTER) printf("CSC costruita e normalizzata --> Distribuzione dati\n");
+        if (rank == MASTER)
+            printf("CSC costruita e normalizzata --> Distribuzione dati\n");
     }
 
     // ========================================================================
     // 2. DISTRIBUZIONE DATI GLOBALI
     // I metadati (colptr e readsum) servono a tutti per calcolare gli offset.
     // ========================================================================
-    MPI_Bcast(colptr,  NODES + 1, MPI_INT, MASTER, MPI_COMM_WORLD);
-    MPI_Bcast(readsum, NODES,     MPI_INT, MASTER, MPI_COMM_WORLD);
+    MPI_Bcast(colptr, NODES + 1, MPI_INT, MASTER, MPI_COMM_WORLD);
+    MPI_Bcast(readsum, NODES, MPI_INT, MASTER, MPI_COMM_WORLD);
 
     // CALCOLO RIPARTIZIONE: Si assegnano blocchi continui di colonne ai processi
-    for (i = 0; i < NPROC; i++) {
-        if (i == 0) {
-            pcols[i]     = NODES / NPROC + NODES % NPROC;
+    for (i = 0; i < NPROC; i++)
+    {
+        if (i == 0)
+        {
+            pcols[i] = NODES / NPROC + NODES % NPROC;
             displs_pr[i] = 0;
-        } else {
-            pcols[i]     = NODES / NPROC;
-            displs_pr[i] = pcols[i-1] + displs_pr[i-1];
+        }
+        else
+        {
+            pcols[i] = NODES / NPROC;
+            displs_pr[i] = pcols[i - 1] + displs_pr[i - 1];
         }
     }
 
     // Sfruttando 'colptr', ogni processo calcola quanti valori non-zeri riceverà (sendcnts)
     // e da quale offset (displs) partirà la sua porzione.
     j = 0;
-    for (i = 0; i < NPROC; i++) {
+    for (i = 0; i < NPROC; i++)
+    {
         j += pcols[i];
         int k = j - pcols[i];
         sendcnts[i] = colptr[j] - colptr[k];
-        if (i == 0) displs[i] = 0;
-        else        displs[i] = sendcnts[i-1] + displs[i-1];
+        if (i == 0)
+            displs[i] = 0;
+        else
+            displs[i] = sendcnts[i - 1] + displs[i - 1];
     }
 
     int my_cnt = sendcnts[rank];
     rec_col = pcols[rank];
 
-    double *rec_val = (double*)malloc(my_cnt * sizeof(double));
-    int    *rec_row = (int*)malloc(my_cnt * sizeof(int));
+    double *rec_val = (double *)malloc(my_cnt * sizeof(double));
+    int *rec_row = (int *)malloc(my_cnt * sizeof(int));
 
     // SCATTER: Il Master invia a ciascun processo SOLO i non-zeri delle proprie colonne.
     MPI_Scatterv(val, sendcnts, displs, MPI_DOUBLE, rec_val, my_cnt, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
     MPI_Scatterv(rowind, sendcnts, displs, MPI_INT, rec_row, my_cnt, MPI_INT, MASTER, MPI_COMM_WORLD);
 
-    if (rank == MASTER) {
+    if (rank == MASTER)
+    {
         free(val);
         free(rowind);
     }
@@ -251,21 +287,25 @@ int main(int argc, char **argv)
     double t_update = 0.0, t_norm = 0.0;
 
     // Buffer locale per ogni thread per evitare Race Conditions durante la SpMV
-    double **thread_sums = (double**)calloc(num_threads, sizeof(double*));
+    double **thread_sums = (double **)calloc(num_threads, sizeof(double *));
 
     #pragma omp parallel private(i, j)
     {
         int tid = omp_get_thread_num();
-        thread_sums[tid] = (double*)calloc(NODES, sizeof(double));
+        thread_sums[tid] = (double *)calloc(NODES, sizeof(double));
         double *local_sum = thread_sums[tid];
         double t_phase = 0.0;
 
-        do {
+        do
+        {
             // Reset dei cronometri e accumulatori all'inizio di ogni iterazione
             memset(local_sum, 0, NODES * sizeof(double));
 
             #pragma omp master
-            { dm_local = 0.0; norm_sq_local = 0.0; }
+            {
+                dm_local = 0.0;
+                norm_sq_local = 0.0;
+            }
 
             int global_col_start = displs_pr[rank];
 
@@ -277,12 +317,15 @@ int main(int argc, char **argv)
 
             // Grazie al formato CSC, ogni processo legge solo le PROPRIE colonne
             // dal vettore 'prold'. Non c'è bisogno di raccogliere l'intero vettore!
+            int local_col;
             #pragma omp for schedule(dynamic, 512)
-            for (int local_col = 0; local_col < rec_col; local_col++) {
+            for (local_col = 0; local_col < rec_col; local_col++)
+            {
                 int global_col = global_col_start + local_col;
                 int start_idx = colptr[global_col] - displs[rank];
-                int end_idx   = colptr[global_col + 1] - displs[rank];
-                for (j = start_idx; j < end_idx; j++) {
+                int end_idx = colptr[global_col + 1] - displs[rank];
+                for (j = start_idx; j < end_idx; j++)
+                {
                     local_sum[rec_row[j]] += rec_val[j] * prold[global_col];
                 }
             }
@@ -296,10 +339,12 @@ int main(int argc, char **argv)
             #pragma omp master
             t_phase = MPI_Wtime();
 
-            #pragma omp for simd
-            for (i = 0; i < NODES; i++) {
+            #pragma omp for
+            for (i = 0; i < NODES; i++)
+            {
                 double total_row_sum = 0.0;
-                for (int t = 0; t < num_threads; t++)
+                int t;
+                for (t = 0; t < num_threads; t++)
                     if (thread_sums[t] != NULL)
                         total_row_sum += thread_sums[t][i];
                 sum[i] = total_row_sum;
@@ -320,8 +365,9 @@ int main(int argc, char **argv)
             }
 
             // LAVORO CPU: Mentre i dati viaggiano, i thread calcolano la dangling mass locale
-            #pragma omp for simd reduction(+:dm_local)
-            for (i = 0; i < rec_col; i++) {
+            #pragma omp for reduction(+ : dm_local)
+            for (i = 0; i < rec_col; i++)
+            {
                 int global_col = global_col_start + i;
                 if (readsum[global_col] == 0)
                     dm_local += prold[global_col];
@@ -346,8 +392,9 @@ int main(int argc, char **argv)
             t_phase = MPI_Wtime();
 
             // Distribuendo iteriamo solo su rec_col di competenza del processo specifico invece che su tutti i NODES
-            #pragma omp for simd reduction(+:norm_sq_local)
-            for (i = 0; i < rec_col; i++) {
+            #pragma omp for reduction(+ : norm_sq_local)
+            for (i = 0; i < rec_col; i++)
+            {
                 int global_col = global_col_start + i;
 
                 // Si calcola il PageRank finale per questo nodo
@@ -387,7 +434,8 @@ int main(int argc, char **argv)
     // ========================================================================
     // PROFILAZIONE E VALIDAZIONE
     // ========================================================================
-    if (rank == MASTER) {
+    if (rank == MASTER)
+    {
         double t_total = t_spmv + t_thread_red + t_allreduce_prnew + t_update + t_norm;
         printf("\n--- PROFILO TEMPO (totale su tutte le iterazioni) ---\n");
         printf("  SpMV locale      : %7.3f s  (%5.1f%%)\n", t_spmv, 100.0 * t_spmv / t_total);
@@ -407,15 +455,17 @@ int main(int argc, char **argv)
     // l'algoritmo converge e funziona bene
     // Raccoglie i pezzi "puliti" calcolati nella Fase D da tutti i processi
     // ========================================================================
-    double *full_pr = (double*)malloc(NODES * sizeof(double));
+    double *full_pr = (double *)malloc(NODES * sizeof(double));
 
     MPI_Allgatherv(prnew + displs_pr[rank], pcols[rank], MPI_DOUBLE,
                    full_pr, pcols, displs_pr, MPI_DOUBLE,
                    MPI_COMM_WORLD);
 
-    if (rank == MASTER) {
+    if (rank == MASTER)
+    {
         double sum_pr = 0.0;
-        for (i = 0; i < NODES; i++) sum_pr += full_pr[i];
+        for (i = 0; i < NODES; i++)
+            sum_pr += full_pr[i];
         printf("\n=============================================\n");
         printf("VERIFICA MATEMATICA VETTORE PAGERANK:\n");
         printf("Somma totale di tutti gli elementi: %.10f\n", sum_pr);
@@ -433,11 +483,17 @@ int main(int argc, char **argv)
     free(full_pr);
 
     // Pulizia finale della memoria
-    free(colptr); free(readsum);
-    free(prold);  free(prnew);   free(sum);
-    free(sendcnts); free(displs);
-    free(pcols);    free(displs_pr);
-    free(rec_val);  free(rec_row);
+    free(colptr);
+    free(readsum);
+    free(prold);
+    free(prnew);
+    free(sum);
+    free(sendcnts);
+    free(displs);
+    free(pcols);
+    free(displs_pr);
+    free(rec_val);
+    free(rec_row);
 
     MPI_Finalize();
     return 0;
