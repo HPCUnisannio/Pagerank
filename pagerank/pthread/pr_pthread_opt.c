@@ -120,31 +120,14 @@ e l'assenza assoluta di conflitti di scrittura (Race Conditions).
 ================================================================================
 */
 
-
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include "data.h"
+#include "../libraries/data.h"
+#include "../libraries/measure.h"
 
-// Gestione del tempo cross-platform (Windows / Linux)
-#ifdef _WIN32
-    #include <windows.h>
-    double get_time() {
-        LARGE_INTEGER t, f;
-        QueryPerformanceCounter(&t);
-        QueryPerformanceFrequency(&f);
-        return (double)t.QuadPart / f.QuadPart;
-    }
-#else
-#include <time.h>
-double get_time() {
-        struct timespec t;
-        clock_gettime(CLOCK_MONOTONIC, &t);
-        return t.tv_sec + t.tv_nsec / 1e9;
-    }
-#endif
 #define CORES 6          // Numero di thread paralleli che lavoreranno insieme
 #define MASTER 0         // Identificativo del thread principale
 
@@ -188,7 +171,7 @@ int main(int argc, char *argv[])
     pthread_barrier_init(&our_barrier, NULL, CORES);
     pthread_barrier_init(&our_barrier2, NULL, CORES);
 
-    GraphType graph_type = GRAPH_BIGGEST;
+    GraphType graph_type = GRAPH_MEDIUM;
     const Graph* graph = get_graph(graph_type);
 
     NODES = graph->nodes;
@@ -196,7 +179,7 @@ int main(int argc, char *argv[])
     FILEPATH = graph->filepath;
 
     FILE *fp;
-    int colindex, link, i, j=0, colmatch=0, localsum=0;
+    int colindex, link, i, j=0, c, colmatch=0, localsum=0;
     long t;
     int rc=0;
 
@@ -307,7 +290,7 @@ int main(int argc, char *argv[])
 
     // Validazione matematica: la somma dei punteggi di PageRank di tutti i nodi deve essere circa 1.0
     double sum_pr = 0.0;
-    for(int i=0; i<NODES; i++) {
+    for(i=0; i<NODES; i++) {
         sum_pr += prold[i];
     }
     printf("Somma finale di controllo PR = %.10f (Validazione superata se vicino a 1.0)\n", sum_pr);
@@ -399,7 +382,8 @@ void *mat_vec(void *rank) {
              * Il thread scorre le memorie private di TUTTI i core (t) cercando la riga 'i'.
              * Somma i contributi che ogni singolo core ha registrato per questo specifico nodo.
              */
-            for(int t = 0; t < CORES; t++) {
+            int t;
+            for(t = 0; t < CORES; t++) {
                 raw_pagerank += all_prnew[t * NODES + i];
             }
 
@@ -442,7 +426,8 @@ void *mat_vec(void *rank) {
            l'uso di un costoso Mutex e di una terza barriera di sincronizzazione.
         */
         double total_norm_sq = 0.0;
-        for(int t = 0; t < CORES; t++) {
+        int t;
+        for(t = 0; t < CORES; t++) {
             total_norm_sq += part_norm[t];
         }
         current_norm = sqrt(total_norm_sq);

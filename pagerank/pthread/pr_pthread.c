@@ -1,4 +1,6 @@
 
+// Compile command:
+// gcc pthread/pr_pthread.c libraries/data.c libraries/measure.c -o pthread/pr_pthread -Ilibraries -lpthread -lm
 /*
 ================================================================================
 # ANALISI DEI BACHI ORIGINALI E DEI FIX APPLICATI
@@ -124,25 +126,8 @@ while(current_norm > ERR) su un valore coerente, e terminano all'unisono.
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-
-#include "data.h"
-
-#ifdef _WIN32
-    #include <windows.h>
-    double get_time() {
-        LARGE_INTEGER t, f;
-        QueryPerformanceCounter(&t);
-        QueryPerformanceFrequency(&f);
-        return (double)t.QuadPart / f.QuadPart;
-    }
-#else
-#include <time.h>
-double get_time() {
-        struct timespec t;
-        clock_gettime(CLOCK_MONOTONIC, &t);
-        return t.tv_sec + t.tv_nsec / 1e9;
-    }
-#endif
+#include "../libraries/data.h"
+#include "../libraries/measure.h"
 
 #define CORES 2
 #define MASTER 0
@@ -192,7 +177,7 @@ int main(int argc, char *argv[])
     pthread_barrier_init(&our_barrier2, NULL, CORES);
     pthread_cond_init(&proceed_cv, NULL);
 
-    GraphType graph_type = GRAPH_BIGGEST;
+    GraphType graph_type = GRAPH_MEDIUM;
     const Graph* graph = get_graph(graph_type);
 
     NODES = graph->nodes;
@@ -200,7 +185,7 @@ int main(int argc, char *argv[])
     FILEPATH = graph->filepath;
 
     FILE *fp;
-    int colindex, link, i, j=0, col, colmatch=0, localsum=0;
+    int colindex, link, i, j=0, col, c, colmatch=0, localsum=0;
     long t;
     int k, rc=0;
 
@@ -283,7 +268,7 @@ int main(int argc, char *argv[])
             localsum += 1;
         } else {
             sum[colmatch] = localsum; // 'sum' nel sequenziale tiene traccia degli out-degree
-            for (int c = colmatch + 1; c <= colindex; c++) {
+            for (c = colmatch + 1; c <= colindex; c++) {
                 colptr[c] = colptr[colmatch] + localsum;
             }
             localsum = 1;
@@ -294,7 +279,7 @@ int main(int argc, char *argv[])
 
     if (EDGES > 0) {
         sum[colmatch] = localsum;
-        for (int c = colmatch + 1; c <= NODES; c++) {
+        for (c = colmatch + 1; c <= NODES; c++) {
             colptr[c] = EDGES;
         }
     }
@@ -339,7 +324,7 @@ int main(int argc, char *argv[])
 
     // Validazione matematica finale
     double sum_pr = 0.0;
-    for(int i=0; i<NODES; i++) {
+    for(i=0; i<NODES; i++) {
         sum_pr += prold[i];
     }
     printf("VERIFICA MATEMATICA: Somma PR = %.10f\n", sum_pr);
