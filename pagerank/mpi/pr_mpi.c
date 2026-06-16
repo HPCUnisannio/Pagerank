@@ -1,3 +1,7 @@
+// Command to compile:
+// mpicc mpi/pr_mpi.c libraries/data.c libraries/measure.c -o mpi/pr_mpi -Ilibraries -lm
+// To run with 4 processes:
+// mpirun -np 4 -machinefile mpi/machinefile.txt mpi/pr_mpi
 /*
 ================================================================================
 # 🚀 PAGERANK DISTRIBUITO (MPI) - VERSIONE BASELINE STABILE ED ESATTA
@@ -157,7 +161,8 @@ sincronizzazione implicita bloccante. Vengono usate solo per il benchmarking rig
 #include <stdlib.h>
 #include <mpi.h>
 
-#include "data.h"
+#include "../libraries/data.h"
+#include "../libraries/measure.h"
 /*
  * Per eseguire da riga di comando e settare più processi, ad esempio 4
  * mpiexec -n 4 ".\cmake-build-debug\pr_mpi.exe"
@@ -180,7 +185,7 @@ int main(int argc, char *argv[])
         printf("Number of processes %d\n", NPROC);
     }
 
-    GraphType graph_type = GRAPH_BIGGEST;
+    GraphType graph_type = GRAPH_MEDIUM;
     const Graph* graph = get_graph(graph_type);
 
     const int NODES = graph->nodes;
@@ -188,7 +193,7 @@ int main(int argc, char *argv[])
     const char* FILEPATH = graph->filepath;
 
     FILE *fp;
-    int colindex, link, i, j = 0, k, col, colmatch = -1, localsum = 0;
+    int colindex, link, i, j = 0, k, col, c, colmatch = -1, localsum = 0;
     int co, index;
 
     // Allocazione strutture principali
@@ -249,7 +254,7 @@ int main(int argc, char *argv[])
            localsum += 1;
        } else {
            readsum[colmatch] = localsum;
-           for(int c = colmatch + 1; c <= colindex; c++) {
+           for(c = colmatch + 1; c <= colindex; c++) {
                colptr[c] = colptr[colmatch] + localsum;
            }
            localsum = 1;
@@ -259,7 +264,7 @@ int main(int argc, char *argv[])
     }
     if (EDGES > 0) {
         readsum[colmatch] = localsum;
-        for (int c = colmatch + 1; c <= NODES; c++) {
+        for (c = colmatch + 1; c <= NODES; c++) {
             colptr[c] = EDGES;
         }
     }
@@ -341,7 +346,8 @@ int main(int argc, char *argv[])
         int global_col_start = (rank == MASTER) ? 0 : displs_pr[rank];
 
         // Iteriamo strettamente sulle colonne assegnate a questo processo (come nel sequenziale)
-        for (int local_col = 0; local_col < rec_col; local_col++) {
+        int local_col;
+        for (local_col = 0; local_col < rec_col; local_col++) {
 
             // Ricalcoliamo l'ID della colonna (nodo) nel contesto globale
             int global_col = global_col_start + local_col;
