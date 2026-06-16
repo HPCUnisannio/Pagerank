@@ -3,26 +3,26 @@
 static const Graph TEST = {
     .nodes = 6,
     .edges = 19,
-    .filepath = "pagerank/dataset/data0.dat"
+    .filepath = "dataset/data0.dat"
 };
 
 
 static const Graph SMALL = {
     .nodes = 4039,
     .edges = 176468,
-    .filepath = "pagerank/dataset/data1.dat"
+    .filepath = "dataset/data1.dat"
 };
 
 static const Graph MEDIUM = {
     .nodes = 685230,
     .edges = 7600595,
-    .filepath = "pagerank/dataset/data2.dat"
+    .filepath = "dataset/data2.dat"
 };
 
 static const Graph BIGGEST = {
     .nodes = 4847571,
     .edges = 68993773,
-    .filepath = "pagerank/dataset/data3.txt"
+    .filepath = "dataset/data3.txt"
 };
 
 const Graph* get_graph(GraphType type) {

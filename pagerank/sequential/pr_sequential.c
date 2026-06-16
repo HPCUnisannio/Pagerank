@@ -1,29 +1,11 @@
-
-// gcc.exe "C:\Users\UTENTE\Desktop\Calcolo Parallelo\Ipotesi Progetto\Pagerank\pagerank\my_code\sequential\pr_sequential.c" "C:\Users\UTENTE\Desktop\Calcolo Parallelo\Ipotesi Progetto\Pagerank\pagerank\my_code\configuration\data.c"  -o pr_sequential -Iconfiguration
+// Command to compile: 
+// gcc sequential/pr_sequential.c libraries/data.c libraries/measure.c -o sequential/pr_sequential -Ilibraries -lm
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../configuration/data.h"
-
-#ifdef _WIN32
-    #include <windows.h>
-    double get_time() {
-       LARGE_INTEGER t, f;
-       QueryPerformanceCounter(&t);
-       QueryPerformanceFrequency(&f);
-       return (double)t.QuadPart / f.QuadPart;
-    }
-#else
-#include <time.h>
-double get_time() {
-       struct timespec t;
-       clock_gettime(CLOCK_MONOTONIC, &t);
-       return t.tv_sec + t.tv_nsec / 1e9;
-    }
-#endif
-
-#include "../configuration/data.h"
+#include "../libraries/data.h"
+#include "../libraries/measure.h"
 
 #define DAMPING 0.85
 #define ERR     0.00001
@@ -34,7 +16,7 @@ int main(int argc, char *argv[])
 {
     printf("Program start\n");
 
-    GraphType graph_type = GRAPH_BIGGEST;
+    GraphType graph_type = GRAPH_MEDIUM;
     const Graph* graph = get_graph(graph_type);
 
     const int NODES = graph->nodes;
@@ -42,7 +24,7 @@ int main(int argc, char *argv[])
     const char* FILEPATH = graph->filepath;
 
     FILE *fp;
-    int colindex, link, i, j = 0, col, colmatch = 0, localsum = 0;
+    int colindex, link, i, j = 0, col, c, colmatch = 0, localsum = 0;
     int co, index;
 
     double *val    = (double *) calloc(EDGES,       sizeof(double));
@@ -101,7 +83,7 @@ int main(int argc, char *argv[])
             localsum += 1;
         } else {
             sum[colmatch] = localsum; // 'sum' nel sequenziale tiene traccia degli out-degree
-            for (int c = colmatch + 1; c <= colindex; c++) {
+            for (c = colmatch + 1; c <= colindex; c++) {
                 colptr[c] = colptr[colmatch] + localsum;
             }
             localsum = 1;
@@ -112,7 +94,7 @@ int main(int argc, char *argv[])
 
     if (EDGES > 0) {
         sum[colmatch] = localsum;
-        for (int c = colmatch + 1; c <= NODES; c++) {
+        for (c = colmatch + 1; c <= NODES; c++) {
             colptr[c] = EDGES;
         }
     }
@@ -231,14 +213,14 @@ int main(int argc, char *argv[])
    printf("=============================================\n");
 
    double sum_pr = 0;
-   for(int i = 0; i < NODES; i++) sum_pr += prnew[i];
+   for(i = 0; i < NODES; i++) sum_pr += prnew[i];
 
    printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
    printf("=============================================\n");
 
     /*
     printf("\n--- VETTORE PAGERANK FINALE ---\n");
-    for (int i = 0; i < NODES; i++) {
+    for (i = 0; i < NODES; i++) {
         printf("Nodo %d: %.6f\n", i + 1, prnew[i]);
     }
     printf("=============================================\n");
