@@ -101,7 +101,8 @@ int main(int argc, char **argv)
         num_threads = omp_get_max_threads();
     }
 
-    MPI_Init(&argc, &argv);
+    int mpi_thread_support;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &mpi_thread_support);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &NPROC);
 
@@ -301,6 +302,7 @@ int main(int argc, char **argv)
     int *rec_row = rowind + displs[rank];
     rec_col = pcols[rank];
 
+    MPI_Barrier(MPI_COMM_WORLD);
     double begin = MPI_Wtime();
 
     // Variabili Shared tra i thread della successiva regione parallela
