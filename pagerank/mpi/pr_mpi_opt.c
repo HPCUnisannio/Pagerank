@@ -1,3 +1,7 @@
+// Command to compile:
+// mpicc mpi/pr_mpi_opt.c libraries/data.c libraries/measure.c -o mpi/pr_mpi_opt -Ilibraries -lm
+// To run with 4 processes:
+// mpirun -np 4 -machinefile mpi/machinefile.txt mpi/pr_mpi_opt
 /*
 ================================================================================
 # PAGERANK DISTRIBUITO (Pure MPI) - VERSIONE OTTIMIZZATA
@@ -58,7 +62,8 @@ Dunque non abbiamo il multithreading.
 #include <stdlib.h>
 #include <mpi.h>
 
-#include "data.h"
+#include "../libraries/data.h"
+#include "../libraries/measure.h"
 
 
 #define MASTER 0
@@ -89,7 +94,7 @@ int main(int argc, char *argv[])
         fflush(stdout);
     }
 
-    int i, j;
+    int i, j, c;
     int colindex, link, colmatch = -1, localsum = 0;
     int co, index;
 
@@ -151,7 +156,7 @@ int main(int argc, char *argv[])
                localsum++;
            } else {
                readsum[colmatch] = localsum;
-               for(int c = colmatch + 1; c <= colindex; c++) {
+               for(c = colmatch + 1; c <= colindex; c++) {
                    colptr[c] = colptr[colmatch] + localsum;
                }
                localsum = 1;
@@ -161,7 +166,7 @@ int main(int argc, char *argv[])
         }
         if (EDGES > 0) {
             readsum[colmatch] = localsum;
-            for (int c = colmatch + 1; c <= NODES; c++) {
+            for (c = colmatch + 1; c <= NODES; c++) {
                 colptr[c] = EDGES;
             }
         }
@@ -240,7 +245,8 @@ int main(int argc, char *argv[])
 
        // --- FASE A: Prodotto Matrice-Vettore (SpMV) Locale ---
        // Ogni processo calcola l'impatto dei soli nodi che gestisce
-       for (int local_col = 0; local_col < rec_col; local_col++) {
+       int local_col;
+       for (local_col = 0; local_col < rec_col; local_col++) {
            int global_col = global_col_start + local_col;
            int start_idx = colptr[global_col] - displs[rank];
            int end_idx   = colptr[global_col + 1] - displs[rank];
@@ -256,7 +262,7 @@ int main(int argc, char *argv[])
        MPI_Iallreduce(local_sum, prnew, NODES, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &request);
 
        // Contemporaneamente calcolo la massa dispersa dai miei nodi pozzo
-       for (int local_col = 0; local_col < rec_col; local_col++) {
+       for (local_col = 0; local_col < rec_col; local_col++) {
            int global_col = global_col_start + local_col;
            if (readsum[global_col] == 0) {
                dm_local += prold[global_col];
@@ -271,7 +277,7 @@ int main(int argc, char *argv[])
 
        // --- FASE C: Post-Processing Distribuito Simmetrico ---
        // Ogni processo aggiorna *solo* le proprie colonne
-       for (int local_col = 0; local_col < rec_col; local_col++) {
+       for (local_col = 0; local_col < rec_col; local_col++) {
            int global_col = global_col_start + local_col;
 
            prnew[global_col] = prnew[global_col] * DAMP1 + DAMP2 + redistribution;
