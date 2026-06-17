@@ -4,7 +4,7 @@
 #ifdef _WIN32
     #include <windows.h>
 #else
-    #include <time.h>
+    #include <sys/time.h>
 #endif
 
 /**
@@ -21,9 +21,10 @@ static inline double get_time(void) {
     QueryPerformanceFrequency(&f);
     return (double)t.QuadPart / f.QuadPart;
 #else
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
+    struct timeval t;
+    struct timezone tz;
+    gettimeofday(&t, &tz);
+    return (double)t.tv_sec + (double)t.tv_usec / 1e6;
 #endif
 }
 
