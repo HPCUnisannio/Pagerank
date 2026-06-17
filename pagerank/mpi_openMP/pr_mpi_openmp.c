@@ -445,11 +445,11 @@ int main(int argc, char **argv)
         printf("Time taken for power iteration solution: %f seconds\n", time_spent);
 
         /*
-                    printf("\n--- VETTORE PAGERANK FINALE ---\n");
-                    for (int i = 0; i < NODES; i++) {
-                        printf("Nodo %d: %.6f\n", i + 1, prnew[i]);
-                    }
-                    printf("=============================================\n");
+        printf("\n--- VETTORE PAGERANK FINALE ---\n");
+        for (i = 0; i < NODES; i++) {
+            printf("Nodo %d: %.6f\n", i + 1, prnew[i]);
+        }
+        printf("=============================================\n");
         */
     }
 

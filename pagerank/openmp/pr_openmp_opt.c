@@ -1,5 +1,6 @@
 // Command to compile:
-// gcc -fopenmp -O2 -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c libraries/data.c libraries/measure.c -Ilibraries -lm// command to run:
+// gcc -fopenmp -O2 -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c libraries/data.c libraries/measure.c -Ilibraries -lm
+// command to run:
 // ./openmp/pr_openmp_opt 4
 /*
 ================================================================================
@@ -267,11 +268,12 @@ int main(int argc, char *argv[])
     printf("TEMPO POWER ITERATION OpenMP (PRIVATIZZATA): %.6f secondi\n", tempo_parallelo);
     printf("=============================================\n");
 
-
-//    printf("\n=== PAGERANK FINALE ===\n");
-//    for (j = 0; j < NODES; j++) {
-//        printf("Nodo %d: %f\n", j + 1, prnew[j]);
-//    }
+    /*
+    printf("\n=== PAGERANK FINALE ===\n");
+    for (j = 0; j < NODES; j++) {
+        printf("Nodo %d: %f\n", j + 1, prnew[j]);
+    }
+    */
 
 
    double sum_pr=0;

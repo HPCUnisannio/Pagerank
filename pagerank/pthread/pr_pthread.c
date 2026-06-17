@@ -330,6 +330,14 @@ int main(int argc, char *argv[])
     printf("VERIFICA MATEMATICA: Somma PR = %.10f\n", sum_pr);
     printf("=============================================\n");
 
+    /*
+    printf("\n--- VETTORE PAGERANK FINALE ---\n");
+    for (i = 0; i < NODES; i++) {
+        printf("Nodo %d: %.6f\n", i + 1, prold[i]);
+    }
+    printf("=============================================\n");
+    */
+
 
     /* Clean up and exit */
     pthread_mutex_destroy(&add_mutex);

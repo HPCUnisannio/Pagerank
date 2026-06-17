@@ -414,7 +414,7 @@ int main(int argc, char *argv[])
 
         /*
         printf("\n--- VETTORE PAGERANK FINALE ---\n");
-        for (int i = 0; i < NODES; i++) {
+        for (i = 0; i < NODES; i++) {
             printf("Nodo %d: %.6f\n", i + 1, prnew[i]);
         }
         printf("=============================================\n");

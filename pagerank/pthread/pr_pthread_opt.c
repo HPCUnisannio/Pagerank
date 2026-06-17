@@ -1,3 +1,5 @@
+// Command to compile:
+// gcc pthread/pr_pthread_opt.c libraries/data.c libraries/measure.c -o pthread/pr_pthread_opt -Ilibraries -lpthread -lm
 /*
 ================================================================================
 # TITOLO: PageRank (Power Iteration) con Pthreads
@@ -294,6 +296,14 @@ int main(int argc, char *argv[])
         sum_pr += prold[i];
     }
     printf("Somma finale di controllo PR = %.10f (Validazione superata se vicino a 1.0)\n", sum_pr);
+
+    /*
+    printf("\n--- VETTORE PAGERANK FINALE ---\n");
+    for (i = 0; i < NODES; i++) {
+        printf("Nodo %d: %.6f\n", i + 1, prold[i]);
+    }
+    printf("=============================================\n");
+    */
 
     // Liberazione totale della memoria allocata per non lasciare residui nella RAM del sistema
     free(all_prnew);
