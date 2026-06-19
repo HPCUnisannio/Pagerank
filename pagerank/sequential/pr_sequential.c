@@ -1,5 +1,3 @@
-// Command to compile: 
-// gcc sequential/pr_sequential.c libraries/data.c libraries/measure.c -o sequential/pr_sequential -Ilibraries -lm
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
@@ -47,6 +45,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // Initialize vectors
     for (i = 0; i < NODES; i++) {
         prold[i] = 1.0 / NODES;
         damp1[i] = DAMPING;
@@ -61,7 +60,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // === NUOVO PARSER SEQUENZIALE ROBUSTO PER GESTIONE DEI POZZI ===
+    // CSC matrix construction with dangling nodes support
     localsum = 0;
     colmatch = -1;
 
@@ -82,7 +81,7 @@ int main(int argc, char *argv[])
         } else if (colmatch == colindex) {
             localsum += 1;
         } else {
-            sum[colmatch] = localsum; // 'sum' nel sequenziale tiene traccia degli out-degree
+            sum[colmatch] = localsum;
             for (c = colmatch + 1; c <= colindex; c++) {
                 colptr[c] = colptr[colmatch] + localsum;
             }
@@ -99,9 +98,8 @@ int main(int argc, char *argv[])
         }
     }
     fclose(fp);
-    // ==========================================================
 
-
+    // Column normalization
     index = 0;
     for (i = 0; i < NODES; i++) {
         co = sum[i];
@@ -110,121 +108,60 @@ int main(int argc, char *argv[])
         }
         index += co;
     }
-/*
-   printf("\n======================= CSC construction complete ==========================\n");
-    printf("\n--- VERIFICA COSTRUZIONE CSC ---\n");
-    printf("COLPTR: ");
-    for (int c = 0; c <= NODES; c++) printf("%d ", colptr[c]);
-    printf("\nROWIND: ");
-    for (int c = 0; c < EDGES; c++) printf("%d ", rowind[c]);
-    printf("\nVAL:    ");
-    for (int c = 0; c < EDGES; c++) printf("%.2f ", val[c]);
-    printf("\n============================================================================\n");
-*/
 
-//===================================================================================================================
-   // POWER ITERATION (Calcolo del PageRank)
-   //===================================================================================================================
-   double start_time = get_time();
-   do {
-        /* 1. Reset del vettore per la nuova iterazione */
+    // Power iteration
+    double start_time = get_time();
+    do {
         memset(prnew, 0, NODES * sizeof(double));
         norm = 0.0;
 
-        /* * ---------------------------------------------------------------------
-         * 2. GESTIONE DEI DANGLING NODES (Nodi Pozzo)
-         * ---------------------------------------------------------------------
-         * Un "dangling node" è un nodo senza link uscenti. Nella moltiplicazione
-         * matrice-vettore standard, il PageRank di questo nodo non viene trasferito
-         * a nessuno, causando una "perdita di massa" globale (la somma totale
-         * del vettore scende sotto 1.0).
-         * Per risolvere, raccogliamo tutta questa probabilità "persa" per poi
-         * redistribuirla equamente a tutta la rete.
-         */
+        // Compute dangling mass from nodes with no outgoing links
         double dangling_mass = 0.0;
         for (col = 0; col < NODES; col++) {
-            // L'array 'sum' contiene l'out-degree (numero di link uscenti) calcolato prima.
-            // Se è 0, siamo di fronte a un nodo pozzo.
             if (sum[col] == 0) {
-                // Accumuliamo il suo PageRank attuale nella massa totale da redistribuire
                 dangling_mass += prold[col];
             }
         }
 
-        /* * Calcoliamo la quota esatta che ogni nodo riceverà dalla massa persa.
-         * Moltiplichiamo per DAMPING perché questa massa segue la regola dei link
-         * (viene cliccata con probabilità d) e la dividiamo per il numero totale di nodi (N).
-         */
         double redistribution = (dangling_mass * DAMPING) / NODES;
 
-
-        /* * ---------------------------------------------------------------------
-         * 3. MOLTIPLICAZIONE MATRICE-VETTORE SPARSA
-         * ---------------------------------------------------------------------
-         * Calcoliamo il trasferimento di PageRank attraverso i link reali.
-         * Si usa il formato CSC per scorrere solo gli archi effettivamente esistenti.
-         */
+        // Sparse matrix-vector multiplication
         for (col = 0; col < NODES; col++) {
             for (j = colptr[col]; j < colptr[col + 1]; j++) {
                 prnew[rowind[j]] += val[j] * prold[col];
             }
         }
 
-
-        /* * ---------------------------------------------------------------------
-         * 4. AGGIORNAMENTO FINALE: Damping, Teleportation e Redistribuzione
-         * ---------------------------------------------------------------------
-         * Ora assembliamo l'equazione completa per ogni nodo 'i':
-         * prnew[i] = (Voti dai link * Damping) + Probabilità di salto casuale + Quota nodi pozzo
-         *
-         * - prnew[i] * damp1[i]: Applica il damping (0.85) ai voti ricevuti.
-         * - damp2[i]: Aggiunge il teleporting (0.15 / N).
-         * - redistribution: Aggiunge la quota recuperata dai dangling nodes.
-         */
+        // Apply damping, teleportation and dangling redistribution
         for (i = 0; i < NODES; i++) {
             prnew[i] = (prnew[i] * damp1[i]) + damp2[i] + redistribution;
         }
 
-
-        /* * ---------------------------------------------------------------------
-         * 5. CALCOLO DELL'ERRORE E AGGIORNAMENTO VETTORE
-         * ---------------------------------------------------------------------
-         * Calcoliamo la Norma L2 (distanza euclidea) tra il nuovo vettore e il vecchio.
-         * Contemporaneamente, copiamo i nuovi valori in 'prold' per prepararci
-         * al prossimo giro.
-         */
+        // Compute L2 norm and update old vector
         norm_sq = 0.0;
         for (i = 0; i < NODES; i++) {
             diff[i]  = prnew[i] - prold[i];
             norm_sq += diff[i] * diff[i];
-            prold[i] = prnew[i]; // Aggiorna il vettore vecchio con il nuovo
+            prold[i] = prnew[i];
         }
 
-        // Radice quadrata della somma dei quadrati delle differenze
         norm = sqrt(norm_sq);
 
-    } while (norm > ERR); // Continua finché la differenza è maggiore di 0.00001
+    } while (norm > ERR);
 
     double end_time = get_time();
     double tempo_sequenziale = end_time - start_time;
 
-   printf("\n=============================================\n");
-   printf("TEMPO DELLA POWER ITERATION SEQUENZIALE: %.6f secondi\n", tempo_sequenziale);
-   printf("=============================================\n");
-
-   double sum_pr = 0;
-   for(i = 0; i < NODES; i++) sum_pr += prnew[i];
-
-   printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
-   printf("=============================================\n");
-
-    /*
-    printf("\n--- VETTORE PAGERANK FINALE ---\n");
-    for (i = 0; i < NODES; i++) {
-        printf("Nodo %d: %.6f\n", i + 1, prnew[i]);
-    }
+    printf("\n=============================================\n");
+    printf("TEMPO DELLA POWER ITERATION SEQUENZIALE: %.6f secondi\n", tempo_sequenziale);
     printf("=============================================\n");
-*/
+
+    // Validate PageRank sum equals 1.0
+    double sum_pr = 0;
+    for (i = 0; i < NODES; i++) sum_pr += prnew[i];
+
+    printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
+    printf("=============================================\n");
 
     free(val);
     free(rowind);
