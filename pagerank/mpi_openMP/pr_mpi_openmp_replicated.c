@@ -69,6 +69,15 @@ int main(int argc, char **argv)
 
     int rec_col;
 
+    // ========================================================================
+    // PHASE 1: SETUP (Master measures, all synchronized at end)
+    // ========================================================================
+    double t_setup_start, t_setup_end, setup_time;
+
+    if (rank == MASTER) {
+        t_setup_start = MPI_Wtime();
+    }
+
     // Build CSC matrix from file (all processes read independently)
     if (csc_build_from_file(FILEPATH, NODES, EDGES, val, rowind, colptr, readsum) != 0) {
         MPI_Abort(MPI_COMM_WORLD, 1);
@@ -79,11 +88,6 @@ int main(int argc, char **argv)
 
     // Initialize PageRank vector
     pagerank_init_vector(NODES, prold);
-
-    if (rank == MASTER) {
-        printf("Initialization complete\n");
-        printf("val, rowind and colptr have been populated\n");
-    }
 
     // Compute column distribution among processes
     compute_column_distribution(NODES, NPROC, pcols, displs_pr);
@@ -96,9 +100,22 @@ int main(int argc, char **argv)
     int    *rec_row = rowind + displs[rank];
     rec_col = pcols[rank];
 
+    // Synchronize: ensure ALL processes have completed setup
     MPI_Barrier(MPI_COMM_WORLD);
-    double begin = MPI_Wtime();
 
+    double t_compute_start, t_compute_end, compute_time;
+    if (rank == MASTER) {
+        t_setup_end = MPI_Wtime();
+        setup_time = t_setup_end - t_setup_start;
+        printf("Initialization complete\n");
+        printf("val, rowind and colptr have been populated\n");
+        t_compute_start = t_setup_end;
+    }
+
+    // ========================================================================
+    // PHASE 2: COMPUTATION (Master measures, all synchronized at both ends)
+    // ========================================================================
+    
     double norm = 0.0;
     double dm_local = 0.0, dm_global = 0.0, norm_sq_local = 0.0;
 
@@ -204,15 +221,16 @@ int main(int argc, char **argv)
     }
     free(thread_sums);
 
-    // ========================================================================
-    // PROFILING
-    // ========================================================================
+    // Synchronize: ensure ALL processes have exited the loop
     MPI_Barrier(MPI_COMM_WORLD);
-    double end = MPI_Wtime();
-    double time_spent = end - begin;
+
+    if (rank == MASTER) {
+        t_compute_end = MPI_Wtime();
+        compute_time = t_compute_end - t_compute_start;
+    }
 
     // ========================================================================
-    // FINAL GATHERING AND VALIDATION
+    // PHASE 3: FINAL GATHERING AND VALIDATION
     // ========================================================================
     double *full_pr = (double *)malloc(NODES * sizeof(double));
 
@@ -222,11 +240,32 @@ int main(int argc, char **argv)
 
     if (rank == MASTER) {
         double sum_pr = pagerank_validate(NODES, full_pr);
-        printf("\n=============================================\n");
-        printf("VERIFICA MATEMATICA VETTORE PAGERANK:\n");
-        printf("Somma totale di tutti gli elementi: %.10f\n", sum_pr);
         printf("=============================================\n");
-        printf("Tempo totale power iteration: %f secondi\n", time_spent);
+        printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
+        printf("=============================================\n");
+
+        // Print execution summary
+        char label[60];
+        sprintf(label, "MPI+OpenMP REPL (%d proc, %d thr)", NPROC, num_threads);
+        double total_time = setup_time + compute_time;
+        measure_print_summary(label, setup_time, compute_time, total_time);
+  
+        // Read sequential time for comparison
+        double sequential_time = 0.0;
+        FILE *time_file = fopen("sequential/sequential_time.txt", "r");
+        if (time_file) {
+            fscanf(time_file, "%lf", &sequential_time);
+            fclose(time_file);
+            
+            char label1[30];
+            sprintf(label1, "Sequenziale");
+            char label2[50];
+            sprintf(label2, "MPI+OpenMP REPL (%d proc, %d thr)", NPROC, num_threads);
+            
+            measure_print_comparison(label1, sequential_time, label2, compute_time);
+        } else {
+            printf("Run sequential version first to generate the baseline.\n");
+        }
 
         /*
         for(i = 0; i < NODES; i++) {

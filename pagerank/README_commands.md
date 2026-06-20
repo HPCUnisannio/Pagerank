@@ -128,6 +128,8 @@ Esecuzione (con 4 processi MPI e 2 thread OpenMP per processo):
 
 mpirun -np 4 -machinefile mpi_openMP/machinefile.txt mpi_openMP/pr_mpi_openmp_replicated 2
 
+for i in {1..6}; do   mpirun -np 4 -machinefile mpi_openMP/machinefile.txt mpi_openMP/pr_mpi_openmp_replicated; done
+
 ---
 
 ## 5. NOTE
