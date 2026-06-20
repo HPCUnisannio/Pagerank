@@ -6,6 +6,7 @@
 
 #include "../libraries/data.h"
 #include "../libraries/measure.h"
+#include "../libraries/pagerank_utils.h"
 
 #define MASTER 0
 #define DAMPING 0.85
@@ -35,9 +36,7 @@ int main(int argc, char *argv[])
         fflush(stdout);
     }
 
-    int i, j, c;
-    int colindex, link, colmatch = -1, localsum = 0;
-    int co, index;
+    int i, j;
 
     // Data structures: only Master allocates full CSC arrays
     double *val = NULL;
@@ -52,7 +51,7 @@ int main(int argc, char *argv[])
     double *prnew     = (double*)calloc(NODES, sizeof(double));
     double *local_sum = (double*)calloc(NODES, sizeof(double));
 
-    // Scalar damping constants (replaces dense arrays damp1, damp2)
+    // Scalar damping constants
     const double DAMP1 = DAMPING;
     const double DAMP2 = (1.0 - DAMPING) / NODES;
 
@@ -64,63 +63,22 @@ int main(int argc, char *argv[])
     int rec_col;
 
     // Initialize PageRank vector
-    for (i = 0; i < NODES; i++) {
-        prold[i] = 1.0 / NODES;
-    }
+    pagerank_init_vector(NODES, prold);
 
     // ========================================================================
     // 1. FILE READING AND CSC CONSTRUCTION (MASTER ONLY)
     // ========================================================================
     if (rank == MASTER) {
-        FILE *fp = fopen(FILEPATH, "r");
-        if (fp == NULL) {
-            fprintf(stderr, "Rank %d - Errore: impossibile aprire il file '%s'\n", rank, FILEPATH);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
         val    = (double*)calloc(EDGES, sizeof(double));
         rowind = (int*)calloc(EDGES, sizeof(int));
 
-        localsum = 0;
-        for (i = 0; i < EDGES; i++) {
-            if (fscanf(fp, "%d %d", &colindex, &link) != 2) {
-                fprintf(stderr, "Rank %d - Errore lettura file\n", rank);
-                fclose(fp);
-                MPI_Abort(MPI_COMM_WORLD, 1);
-            }
-            colindex--; link--;
-            rowind[i] = link;
-
-            if (i == 0) {
-                colmatch = colindex;
-                localsum = 1;
-            } else if (colmatch == colindex) {
-                localsum++;
-            } else {
-                readsum[colmatch] = localsum;
-                for (c = colmatch + 1; c <= colindex; c++) {
-                    colptr[c] = colptr[colmatch] + localsum;
-                }
-                localsum = 1;
-                colmatch = colindex;
-            }
-            val[i] = 1.0;
+        if (csc_build_from_file(FILEPATH, NODES, EDGES, val, rowind, colptr, readsum) != 0) {
+            MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        if (EDGES > 0) {
-            readsum[colmatch] = localsum;
-            for (c = colmatch + 1; c <= NODES; c++) {
-                colptr[c] = EDGES;
-            }
-        }
-        fclose(fp);
 
         // Column normalization
-        index = 0;
-        for (i = 0; i < NODES; i++) {
-            co = readsum[i];
-            for (j = index; j < index + co; j++) val[j] /= co;
-            index += co;
-        }
+        csc_normalize_columns(NODES, EDGES, val, colptr, readsum);
+
         printf("CSC costruita e normalizzata --> Inizio Distribuzione Rete\n");
     }
 
@@ -131,25 +89,10 @@ int main(int argc, char *argv[])
     MPI_Bcast(readsum, NODES, MPI_INT, MASTER, MPI_COMM_WORLD);
 
     // Compute column distribution
-    for (i = 0; i < NPROC; i++) {
-        if (i == 0) {
-            pcols[i]      = NODES / NPROC + NODES % NPROC;
-            displs_pr[i]  = 0;
-        } else {
-            pcols[i]      = NODES / NPROC;
-            displs_pr[i]  = pcols[i - 1] + displs_pr[i - 1];
-        }
-    }
+    compute_column_distribution(NODES, NPROC, pcols, displs_pr);
 
     // Compute non-zero element counts and displacements
-    j = 0;
-    for (i = 0; i < NPROC; i++) {
-        j += pcols[i];
-        int k = j - pcols[i];
-        sendcnts[i] = colptr[j] - colptr[k];
-        if (i == 0) displs[i] = 0;
-        else        displs[i] = sendcnts[i - 1] + displs[i - 1];
-    }
+    compute_nnz_distribution(NPROC, pcols, colptr, sendcnts, displs);
 
     int my_cnt = sendcnts[rank];
     rec_col = pcols[rank];
@@ -178,14 +121,13 @@ int main(int argc, char *argv[])
 
     do {
         memset(local_sum, 0, NODES * sizeof(double));
-        dm_local     = 0.0;
+        dm_local      = 0.0;
         norm_sq_local = 0.0;
 
         int global_col_start = displs_pr[rank];
 
         // Phase A: Local sparse matrix-vector multiplication
-        int local_col;
-        for (local_col = 0; local_col < rec_col; local_col++) {
+        for (int local_col = 0; local_col < rec_col; local_col++) {
             int global_col = global_col_start + local_col;
             int start_idx  = colptr[global_col] - displs[rank];
             int end_idx    = colptr[global_col + 1] - displs[rank];
@@ -200,12 +142,9 @@ int main(int argc, char *argv[])
         MPI_Iallreduce(local_sum, prnew, NODES, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &request);
 
         // Compute local dangling mass while reduction is in progress
-        for (local_col = 0; local_col < rec_col; local_col++) {
-            int global_col = global_col_start + local_col;
-            if (readsum[global_col] == 0) {
-                dm_local += prold[global_col];
-            }
-        }
+        dm_local = pagerank_compute_dangling_mass_range(prold, readsum,
+                                                        global_col_start,
+                                                        global_col_start + rec_col);
 
         // Synchronize dangling mass and wait for prnew to be ready
         MPI_Allreduce(&dm_local, &dm_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
@@ -214,16 +153,9 @@ int main(int argc, char *argv[])
         double redistribution = dm_global * DAMP1 / NODES;
 
         // Phase C: Symmetric distributed post-processing
-        for (local_col = 0; local_col < rec_col; local_col++) {
-            int global_col = global_col_start + local_col;
-
-            prnew[global_col] = prnew[global_col] * DAMP1 + DAMP2 + redistribution;
-
-            double diff = prnew[global_col] - prold[global_col];
-            norm_sq_local += diff * diff;
-
-            prold[global_col] = prnew[global_col];
-        }
+        pagerank_update_and_norm_range(prnew, prold,
+                                       global_col_start, global_col_start + rec_col,
+                                       redistribution, DAMPING, NODES, &norm_sq_local);
 
         // Phase D: Convergence evaluation
         MPI_Allreduce(&norm_sq_local, &norm_sq_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
@@ -245,14 +177,19 @@ int main(int argc, char *argv[])
                    MPI_COMM_WORLD);
 
     if (rank == MASTER) {
-        double sum_pr = 0;
-        for (i = 0; i < NODES; i++) sum_pr += full_pr[i];
+        double sum_pr = pagerank_validate(NODES, full_pr);
 
         printf("\n=============================================\n");
         printf("VERIFICA MATEMATICA VETTORE PAGERANK:\n");
         printf("Somma totale di tutti gli elementi: %.10f\n", sum_pr);
         printf("Tempo puro di Iterazione: %f secondi\n", time_spent);
         printf("=============================================\n");
+
+        /*
+        for(i = 0; i < NODES; i++) {
+            printf("Node %d: PageRank = %.10f\n", i, full_pr[i]);
+        }
+        */
     }
 
     // Free memory

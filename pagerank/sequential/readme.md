@@ -103,7 +103,7 @@ Il parser CSC gestisce correttamente:
 
 Compilazione:
 
-gcc sequential/pr_sequential.c libraries/data.c libraries/measure.c -o sequential/pr_sequential -Ilibraries -lm
+gcc sequential/pr_sequential.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o sequential/pr_sequential -Ilibraries -lm
 
 Esecuzione:
 

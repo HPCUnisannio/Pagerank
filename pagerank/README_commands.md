@@ -12,7 +12,7 @@ Questo documento raccoglie tutti i comandi di compilazione ed esecuzione per le 
 
 Compilazione:
 
-gcc sequential/pr_sequential.c libraries/data.c libraries/measure.c -o sequential/pr_sequential -Ilibraries -lm
+gcc sequential/pr_sequential.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o sequential/pr_sequential -Ilibraries -lm
 
 Esecuzione:
 
@@ -26,7 +26,7 @@ Esecuzione:
 
 Compilazione:
 
-gcc pthread/pr_pthread.c libraries/data.c libraries/measure.c -o pthread/pr_pthread -Ilibraries -lpthread -lm
+gcc pthread/pr_pthread.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o pthread/pr_pthread -Ilibraries -lpthread -lm
 
 Esecuzione:
 
@@ -36,7 +36,7 @@ Esecuzione:
 
 Compilazione:
 
-gcc pthread/pr_pthread_opt.c libraries/data.c libraries/measure.c -o pthread/pr_pthread_opt -Ilibraries -lpthread -lm
+gcc pthread/pr_pthread_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o pthread/pr_pthread_opt -Ilibraries -lpthread -lm
 
 Esecuzione:
 
@@ -50,7 +50,7 @@ Esecuzione:
 
 Compilazione:
 
-gcc -fopenmp -O2 -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c libraries/data.c libraries/measure.c -Ilibraries -lm
+gcc -fopenmp -O2 -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -Ilibraries -lm
 
 Esecuzione (con 4 thread):
 
@@ -64,7 +64,7 @@ Esecuzione (con 4 thread):
 
 Compilazione:
 
-mpicc mpi/pr_mpi.c libraries/data.c libraries/measure.c -o mpi/pr_mpi -Ilibraries -lm
+mpicc mpi/pr_mpi.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi/pr_mpi -Ilibraries -lm
 
 Esecuzione (con 4 processi):
 
@@ -74,7 +74,7 @@ mpirun -np 4 -machinefile mpi/machinefile.txt mpi/pr_mpi
 
 Compilazione:
 
-mpicc mpi/pr_mpi_opt.c libraries/data.c libraries/measure.c -o mpi/pr_mpi_opt -Ilibraries -lm
+mpicc mpi/pr_mpi_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi/pr_mpi_opt -Ilibraries -lm
 
 Esecuzione (con 4 processi):
 
@@ -88,7 +88,7 @@ mpirun -np 4 -machinefile mpi/machinefile.txt mpi/pr_mpi_opt
 
 Compilazione:
 
-mpicc mpi_openMP/pr_mpi_openmp.c libraries/data.c libraries/measure.c -o mpi_openMP/pr_mpi_openmp -Ilibraries -fopenmp -lm
+mpicc mpi_openMP/pr_mpi_openmp.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi_openMP/pr_mpi_openmp -Ilibraries -fopenmp -lm
 
 Esecuzione (con 4 processi MPI e 2 thread OpenMP per processo):
 
@@ -98,7 +98,7 @@ mpirun -np 4 -machinefile mpi_openMP/machinefile.txt mpi_openMP/pr_mpi_openmp 2
 
 Compilazione:
 
-mpicc mpi_openMP/pr_mpi_openmp_centralized.c libraries/data.c libraries/measure.c -o mpi_openMP/pr_mpi_openmp_centralized -Ilibraries -fopenmp -lm
+mpicc mpi_openMP/pr_mpi_openmp_centralized.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi_openMP/pr_mpi_openmp_centralized -Ilibraries -fopenmp -lm
 
 Esecuzione (con 4 processi MPI e 2 thread OpenMP per processo):
 
@@ -108,7 +108,7 @@ mpirun -np 4 -machinefile mpi_openMP/machinefile.txt mpi_openMP/pr_mpi_openmp_ce
 
 Compilazione:
 
-mpicc mpi_openMP/pr_mpi_openmp_replicated.c libraries/data.c libraries/measure.c -o mpi_openMP/pr_mpi_openmp_replicated -Ilibraries -fopenmp -lm
+mpicc mpi_openMP/pr_mpi_openmp_replicated.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi_openMP/pr_mpi_openmp_replicated -Ilibraries -fopenmp -lm
 
 Esecuzione (con 4 processi MPI e 2 thread OpenMP per processo):
 

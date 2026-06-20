@@ -118,7 +118,7 @@ Il damping viene applicato dal master dopo la riduzione globale, garantendo che 
 
 Compilazione:
 
-mpicc mpi/pr_mpi.c libraries/data.c libraries/measure.c -o mpi/pr_mpi -Ilibraries -lm
+mpicc mpi/pr_mpi.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi/pr_mpi -Ilibraries -lm
 
 Esecuzione con 4 processi:
 
@@ -205,7 +205,7 @@ MPI_Allreduce somma le norme parziali di tutti i processi. Ogni processo calcola
 
 Compilazione:
 
-mpicc mpi/pr_mpi_opt.c libraries/data.c libraries/measure.c -o mpi/pr_mpi_opt -Ilibraries -lm
+mpicc mpi/pr_mpi_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi/pr_mpi_opt -Ilibraries -lm
 
 Esecuzione con 4 processi:
 

@@ -7,6 +7,7 @@
 
 #include "../libraries/data.h"
 #include "../libraries/measure.h"
+#include "../libraries/pagerank_utils.h"
 
 #define MASTER 0
 #define DAMPING 0.85
@@ -45,9 +46,7 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    FILE *fp;
-    int colindex, link, i, j = 0, col, c, colmatch = -1, localsum = 0;
-    int co, index;
+    int i, j;
 
     // Allocate main structures (replicated on all processes)
     double *val    = (double *)calloc(EDGES, sizeof(double));
@@ -70,94 +69,27 @@ int main(int argc, char **argv)
 
     int rec_col;
 
-    // Initialize PageRank vector
-    for (i = 0; i < NODES; i++) {
-        prold[i] = 1.0 / NODES;
-    }
-
-    if (rank == MASTER) {
-        printf("Initialization complete\n");
-    }
-
-    // Read file (all processes read independently)
-    fp = fopen(FILEPATH, "r");
-    if (fp == NULL) {
-        fprintf(stderr, "Rank %d - Errore: impossibile aprire il file '%s'\n", rank, FILEPATH);
+    // Build CSC matrix from file (all processes read independently)
+    if (csc_build_from_file(FILEPATH, NODES, EDGES, val, rowind, colptr, readsum) != 0) {
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    // CSC matrix construction with dangling nodes support
-    localsum = 0;
-    for (i = 0; i < EDGES; i++) {
-        if (fscanf(fp, "%d %d", &colindex, &link) != 2) {
-            fprintf(stderr, "Rank %d - Errore lettura file alla riga %d\n", rank, i + 1);
-            fclose(fp);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        colindex = colindex - 1;
-        link = link - 1;
-        rowind[i] = link;
+    // Normalize columns
+    csc_normalize_columns(NODES, EDGES, val, colptr, readsum);
 
-        if (i == 0) {
-            colmatch = colindex;
-            localsum = 1;
-        } else if (colmatch == colindex) {
-            localsum += 1;
-        } else {
-            readsum[colmatch] = localsum;
-            for (c = colmatch + 1; c <= colindex; c++) {
-                colptr[c] = colptr[colmatch] + localsum;
-            }
-            localsum = 1;
-            colmatch = colindex;
-        }
-        val[i] = 1.0;
-    }
-    if (EDGES > 0) {
-        readsum[colmatch] = localsum;
-        for (c = colmatch + 1; c <= NODES; c++) {
-            colptr[c] = EDGES;
-        }
-    }
-    fclose(fp);
-
-    // Column normalization
-    index = 0;
-    for (i = 0; i < NODES; i++) {
-        co = readsum[i];
-        for (j = index; j < index + co; j++) {
-            val[j] = val[j] / co;
-        }
-        index += co;
-    }
+    // Initialize PageRank vector
+    pagerank_init_vector(NODES, prold);
 
     if (rank == MASTER) {
+        printf("Initialization complete\n");
         printf("val, rowind and colptr have been populated\n");
     }
 
     // Compute column distribution among processes
-    for (i = 0; i < NPROC; i++) {
-        if (i == 0) {
-            pcols[i] = NODES / NPROC + NODES % NPROC;
-            displs_pr[i] = 0;
-        } else {
-            pcols[i] = NODES / NPROC;
-            displs_pr[i] = pcols[i - 1] + displs_pr[i - 1];
-        }
-    }
+    compute_column_distribution(NODES, NPROC, pcols, displs_pr);
 
     // Compute non-zero element counts and displacements
-    j = 0;
-    for (i = 0; i < NPROC; i++) {
-        j = j + pcols[i];
-        int k = j - pcols[i];
-        sendcnts[i] = colptr[j] - colptr[k];
-        if (i == 0) {
-            displs[i] = 0;
-        } else {
-            displs[i] = sendcnts[i - 1] + displs[i - 1];
-        }
-    }
+    compute_nnz_distribution(NPROC, pcols, colptr, sendcnts, displs);
 
     // Local pointers: each process uses its own portion via pointer arithmetic
     double *rec_val = val + displs[rank];
@@ -228,16 +160,7 @@ int main(int argc, char **argv)
                 t_phase = MPI_Wtime();
             }
 
-            #pragma omp for
-            for (i = 0; i < NODES; i++) {
-                double total_row_sum = 0.0;
-                int t;
-                for (t = 0; t < num_threads; t++) {
-                    if (thread_sums[t] != NULL)
-                        total_row_sum += thread_sums[t][i];
-                }
-                sum[i] = total_row_sum;
-            }
+            reduce_thread_sums(NODES, num_threads, thread_sums, sum);
 
             #pragma omp master
             {
@@ -253,13 +176,9 @@ int main(int argc, char **argv)
             }
 
             // Block 5: Overlap - compute local dangling mass while network works
-            #pragma omp for reduction(+ : dm_local)
-            for (i = 0; i < rec_col; i++) {
-                int global_col = global_col_start + i;
-                if (readsum[global_col] == 0) {
-                    dm_local += prold[global_col];
-                }
-            }
+            dm_local = pagerank_compute_dangling_mass_range(prold, readsum,
+                                                            global_col_start,
+                                                            global_col_start + rec_col);
 
             #pragma omp master
             {
@@ -277,17 +196,9 @@ int main(int argc, char **argv)
                 t_phase = MPI_Wtime();
             }
 
-            #pragma omp for reduction(+ : norm_sq_local)
-            for (i = 0; i < rec_col; i++) {
-                int global_col = global_col_start + i;
-
-                prnew[global_col] = prnew[global_col] * DAMP1 + DAMP2 + redistribution;
-
-                double diff = prnew[global_col] - prold[global_col];
-                norm_sq_local += diff * diff;
-
-                prold[global_col] = prnew[global_col];
-            }
+            pagerank_update_and_norm_range(prnew, prold,
+                                           global_col_start, global_col_start + rec_col,
+                                           redistribution, DAMPING, NODES, &norm_sq_local);
 
             #pragma omp master
             {
@@ -339,15 +250,18 @@ int main(int argc, char **argv)
                    MPI_COMM_WORLD);
 
     if (rank == MASTER) {
-        double sum_pr = 0.0;
-        for (i = 0; i < NODES; i++) {
-            sum_pr += full_pr[i];
-        }
+        double sum_pr = pagerank_validate(NODES, full_pr);
         printf("\n=============================================\n");
         printf("VERIFICA MATEMATICA VETTORE PAGERANK:\n");
         printf("Somma totale di tutti gli elementi: %.10f\n", sum_pr);
         printf("=============================================\n");
         printf("Tempo totale power iteration: %f secondi\n", time_spent);
+
+        /*
+        for(i = 0; i < NODES; i++) {
+            printf("Nodo %d: PageRank = %.10f\n", i, full_pr[i]);
+        }
+        */
     }
 
     free(full_pr);

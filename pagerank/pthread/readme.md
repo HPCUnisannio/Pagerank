@@ -75,7 +75,7 @@ I vettori locali vengono deallocati prima dell'uscita del thread per prevenire m
 9. Verifica Convergenza: Lettura thread-safe della norma
 
 ## Comando di Compilazione
-gcc pthread/pr_pthread.c libraries/data.c libraries/measure.c -o pthread/pr_pthread -Ilibraries -lpthread -lm
+gcc pthread/pr_pthread.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o pthread/pr_pthread -Ilibraries -lpthread -lm
 
 ---
 
@@ -156,7 +156,7 @@ Il pattern di accesso strided sfrutta la località spaziale grazie all'allocazio
 Il damping viene applicato durante la fase di riduzione, dopo aver sommato tutti i contributi grezzi, garantendo la correttezza matematica che le versioni precedenti violavano.
 
 ## Comando di Compilazione
-gcc pthread/pr_pthread_opt.c libraries/data.c libraries/measure.c -o pthread/pr_pthread_opt -Ilibraries -lpthread -lm
+gcc pthread/pr_pthread_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o pthread/pr_pthread_opt -Ilibraries -lpthread -lm
 
 ---
 

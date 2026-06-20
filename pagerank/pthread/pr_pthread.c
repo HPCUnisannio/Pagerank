@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include "../libraries/data.h"
 #include "../libraries/measure.h"
+#include "../libraries/pagerank_utils.h"
 
 #define CORES 2
 #define MASTER 0
@@ -15,7 +16,7 @@ double sqrt(double x);
 void *mat_vec(void *);
 
 // CSR sparse matrix data
-double *val, *prold, *prnew, *damp1, *damp2, *diff;
+double *val, *prold, *prnew;
 int *rowind, *colptr, *sum;
 
 // Synchronization primitives
@@ -26,7 +27,7 @@ pthread_barrier_t our_barrier;
 pthread_barrier_t our_barrier2;
 pthread_cond_t proceed_cv;
 
-double norm, norm_sq;
+double norm;
 int var_wait;
 
 // Dangling nodes mass with dedicated mutex
@@ -57,97 +58,40 @@ int main(int argc, char *argv[])
     EDGES = graph->edges;
     FILEPATH = graph->filepath;
 
-    FILE *fp;
-    int colindex, link, i, j=0, col, c, colmatch=0, localsum=0;
     long t;
-    int k, rc=0;
+    int rc = 0;
 
-    val = (double*)calloc(EDGES, sizeof(double));
+    val    = (double*)calloc(EDGES, sizeof(double));
     rowind = (int*)calloc(EDGES, sizeof(int));
-    colptr = (int*)calloc(NODES+1, sizeof(int));
+    colptr = (int*)calloc(NODES + 1, sizeof(int));
+    sum    = (int*)calloc(NODES, sizeof(int));
 
-    int co, index;
-
-    prold = (double*)malloc(NODES*sizeof(double));
+    prold = (double*)malloc(NODES * sizeof(double));
     prnew = (double*)calloc(NODES, sizeof(double));
-    damp1 = (double*)malloc(NODES*sizeof(double));
-    damp2 = (double*)malloc(NODES*sizeof(double));
-    diff = (double*)calloc(NODES, sizeof(double));
-    sum = (int*)calloc(NODES, sizeof(int));
 
-    // Initialize vectors
-    for(i=0; i<NODES; i++) {
-        prold[i] = 1.0 / NODES;
-        damp1[i] = DAMPING;
-        damp2[i] = (1.0 - DAMPING)/NODES;
+    // Build CSC matrix from file
+    const char *filename = (argc > 1) ? argv[1] : FILEPATH;
+    if (csc_build_from_file(filename, NODES, EDGES, val, rowind, colptr, sum) != 0) {
+        return 1;
     }
+
+    // Normalize columns
+    csc_normalize_columns(NODES, EDGES, val, colptr, sum);
+
+    // Initialize PageRank vector
+    pagerank_init_vector(NODES, prold);
+
     printf("initialization complete\n");
 
     norm = 1.0;
     var_wait = 0;
-
-    const char *filename = (argc > 1) ? argv[1] : FILEPATH;
-    fp = fopen(filename, "r");
-    if (!fp) {
-        fprintf(stderr, "Errore: impossibile aprire il file'%s'\n", filename);
-        return 1;
-    }
-
-    // CSC matrix construction from edge list
-    localsum = 0;
-    colmatch = -1;
-
-    for (i = 0; i < EDGES; i++) {
-        if (fscanf(fp, "%d %d", &colindex, &link) != 2) {
-            fprintf(stderr, "Errore lettura file alla riga %d\n", i + 1);
-            fclose(fp);
-            return 1;
-        }
-
-        colindex = colindex - 1;
-        link     = link - 1;
-        rowind[i] = link;
-
-        if (i == 0) {
-            colmatch = colindex;
-            localsum = 1;
-        } else if (colmatch == colindex) {
-            localsum += 1;
-        } else {
-            sum[colmatch] = localsum;
-            for (c = colmatch + 1; c <= colindex; c++) {
-                colptr[c] = colptr[colmatch] + localsum;
-            }
-            localsum = 1;
-            colmatch = colindex;
-        }
-        val[i] = 1.0;
-    }
-
-    if (EDGES > 0) {
-        sum[colmatch] = localsum;
-        for (c = colmatch + 1; c <= NODES; c++) {
-            colptr[c] = EDGES;
-        }
-    }
-    fclose(fp);
-
-    // Column normalization for stochastic matrix
-    index = 0;
-    for(i = 0; i<NODES; i++) {
-        co = sum[i];
-        for(j = index; j < index+co; j++) {
-            val[j] = val[j]/co;
-        }
-        index += co;
-    }
 
     printf("\n=== STRUTTURA CSC COSTRUITA ===\n");
 
     // Launch parallel power iteration
     double start_time = get_time();
 
-    for(t=0; t<CORES; t++) {
+    for (t = 0; t < CORES; t++) {
         rc = pthread_create(&p_threads[t], NULL, mat_vec, (void*)t);
         if (rc) {
             printf("ERROR: return code from pthread_create() is %d\n", rc);
@@ -155,7 +99,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    for(t= 0; t<CORES; t++) {
+    for (t = 0; t < CORES; t++) {
         pthread_join(p_threads[t], NULL);
     }
 
@@ -167,12 +111,15 @@ int main(int argc, char *argv[])
     printf("=============================================\n");
 
     // Verify PageRank sum equals 1.0
-    double sum_pr = 0.0;
-    for(i=0; i<NODES; i++) {
-        sum_pr += prold[i];
-    }
+    double sum_pr = pagerank_validate(NODES, prold);
     printf("VERIFICA MATEMATICA: Somma PR = %.10f\n", sum_pr);
     printf("=============================================\n");
+
+    /*
+    for(i = 0; i < NODES; i++) {
+        printf("Node %d: PageRank = %.10f\n", i, prold[i]);
+    }
+    */
 
     pthread_mutex_destroy(&add_mutex);
     pthread_mutex_destroy(&wait_mutex);
@@ -181,27 +128,32 @@ int main(int argc, char *argv[])
     pthread_barrier_destroy(&our_barrier);
     pthread_barrier_destroy(&our_barrier2);
     pthread_cond_destroy(&proceed_cv);
+
+    free(val);
+    free(rowind);
+    free(colptr);
+    free(prold);
+    free(prnew);
+    free(sum);
+
     pthread_exit(NULL);
 }
 
-void *mat_vec(void *rank) {
+void *mat_vec(void *rank)
+{
     long tid = (long)rank;
 
-    int i, j, col, local_col, my_first_col, my_last_col;
+    int i, col, local_col, my_first_col, my_last_col;
     double *localpr = (double*)calloc(NODES, sizeof(double));
     double current_norm;
 
-    // 1D column partitioning
-    if (tid==0) {
-        local_col = NODES/CORES + NODES%CORES;
-        my_first_col = 0;
-        my_last_col = my_first_col + local_col - 1;
-    }
-    else {
-        local_col = NODES/CORES;
-        my_first_col = tid*local_col + NODES%CORES;
-        my_last_col = my_first_col + local_col - 1;
-    }
+    // 1D column partitioning using utility function
+    int pcols[CORES], displs[CORES];
+    compute_column_distribution(NODES, CORES, pcols, displs);
+
+    local_col = pcols[tid];
+    my_first_col = displs[tid];
+    my_last_col = my_first_col + local_col - 1;
 
     do {
         // Reset dangling mass for new iteration
@@ -212,12 +164,8 @@ void *mat_vec(void *rank) {
         pthread_barrier_wait(&our_barrier2);
 
         // Compute local dangling mass contribution
-        double local_dangling_mass = 0.0;
-        for (col = my_first_col; col <= my_last_col; col++) {
-            if (sum[col] == 0) {
-                local_dangling_mass += prold[col];
-            }
-        }
+        double local_dangling_mass = pagerank_compute_dangling_mass_range(
+            prold, sum, my_first_col, my_last_col + 1);
 
         if (local_dangling_mass > 0.0) {
             pthread_mutex_lock(&dangling_mutex);
@@ -226,15 +174,12 @@ void *mat_vec(void *rank) {
         }
 
         // Sparse matrix-vector multiplication
-        for(col=my_first_col; col<=my_last_col; col++) {
-            for(j = colptr[col]; j<colptr[col+1]; j++) {
-                localpr[rowind[j]] += val[j]*prold[col];
-            }
-        }
+        csc_spmv_range(val, rowind, colptr, prold, localpr,
+                       my_first_col, my_last_col + 1, 0);
 
         // Thread-safe accumulation into global vector
-        for(i=0; i<NODES; i++) {
-            if (localpr[i]!=0.0) {
+        for (i = 0; i < NODES; i++) {
+            if (localpr[i] != 0.0) {
                 pthread_mutex_lock(&add_mutex);
                 prnew[i] += localpr[i];
                 pthread_mutex_unlock(&add_mutex);
@@ -244,39 +189,32 @@ void *mat_vec(void *rank) {
         pthread_barrier_wait(&our_barrier);
 
         // Master applies damping and checks convergence
-        if (tid==MASTER) {
+        if (tid == MASTER) {
             pthread_mutex_lock(&norm_mutex);
 
             double redistribution = (global_dangling_mass * DAMPING) / NODES;
-
             var_wait = 0;
-            norm_sq = 0.0;
 
-            for(i=0; i<NODES; i++) {
-                prnew[i] = (prnew[i] * damp1[i]) + damp2[i] + redistribution;
-                diff[i] = prnew[i] - prold[i];
-                norm_sq += diff[i]*diff[i];
-                prold[i] = prnew[i];
-            }
-
+            double norm_sq = 0.0;
+            pagerank_update_and_norm_range(prnew, prold, 0, NODES,
+                                           redistribution, DAMPING, NODES, &norm_sq);
             norm = sqrt(norm_sq);
 
             pthread_mutex_unlock(&norm_mutex);
 
-            memset(prnew, 0, NODES*sizeof(double));
+            memset(prnew, 0, NODES * sizeof(double));
 
             var_wait = 1;
             pthread_cond_broadcast(&proceed_cv);
-        }
-        else {
+        } else {
             pthread_mutex_lock(&wait_mutex);
-            while(!var_wait) {
+            while (!var_wait) {
                 pthread_cond_wait(&proceed_cv, &wait_mutex);
             }
             pthread_mutex_unlock(&wait_mutex);
         }
 
-        memset(localpr, 0, NODES*sizeof(double));
+        memset(localpr, 0, NODES * sizeof(double));
 
         pthread_barrier_wait(&our_barrier);
 
@@ -285,7 +223,7 @@ void *mat_vec(void *rank) {
         current_norm = norm;
         pthread_mutex_unlock(&norm_mutex);
 
-    } while(current_norm > ERR);
+    } while (current_norm > ERR);
 
     free(localpr);
     pthread_exit(NULL);

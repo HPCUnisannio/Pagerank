@@ -6,6 +6,7 @@
 
 #include "../libraries/data.h"
 #include "../libraries/measure.h"
+#include "../libraries/pagerank_utils.h"
 
 #define MASTER 0
 #define DAMPING 0.85
@@ -31,9 +32,7 @@ int main(int argc, char *argv[])
     const int EDGES = graph->edges;
     const char* FILEPATH = graph->filepath;
 
-    FILE *fp;
-    int colindex, link, i, j = 0, k, col, c, colmatch = -1, localsum = 0;
-    int co, index;
+    int i, j;
 
     // Allocate main structures
     double *val    = (double*)calloc(EDGES, sizeof(double));
@@ -43,109 +42,37 @@ int main(int argc, char *argv[])
 
     double *prold = (double*)malloc(NODES * sizeof(double));
     double *prnew = (double*)calloc(NODES, sizeof(double));
-    double *damp1 = (double*)malloc(NODES * sizeof(double));
-    double *damp2 = (double*)malloc(NODES * sizeof(double));
-    double *diff  = (double*)calloc(NODES, sizeof(double));
     double *sum   = (double*)calloc(NODES, sizeof(double));
 
-    int *sendcnts   = malloc(sizeof(int) * NPROC);
-    int *displs     = malloc(sizeof(int) * NPROC);
-    int *pcols      = (int*)malloc(NPROC * sizeof(int));
-    int *displs_pr  = (int*)malloc(NPROC * sizeof(int));
+    int *sendcnts  = malloc(sizeof(int) * NPROC);
+    int *displs    = malloc(sizeof(int) * NPROC);
+    int *pcols     = (int*)malloc(NPROC * sizeof(int));
+    int *displs_pr = (int*)malloc(NPROC * sizeof(int));
 
     double norm;
     int rec_col;
 
-    // Initialize vectors
-    for (i = 0; i < NODES; i++) {
-        prold[i] = 1.0 / NODES;
-        damp1[i] = DAMPING;
-        damp2[i] = (1.0 - DAMPING) / NODES;
-    }
-
-    if (rank == MASTER) {
-        printf("Initialization complete\n");
-    }
-
-    // Read file
-    fp = fopen(FILEPATH, "r");
-    if (fp == NULL) {
-        fprintf(stderr, "Rank %d - Errore: impossibile aprire il file '%s'\n", rank, FILEPATH);
+    // Build CSC matrix from file (all processes read)
+    if (csc_build_from_file(FILEPATH, NODES, EDGES, val, rowind, colptr, readsum) != 0) {
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    // CSC matrix construction with dangling nodes support
-    localsum = 0;
-    for (i = 0; i < EDGES; i++) {
-        if (fscanf(fp, "%d %d", &colindex, &link) != 2) {
-            fprintf(stderr, "Rank %d - Errore lettura file alla riga %d\n", rank, i + 1);
-            fclose(fp);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        colindex = colindex - 1;
-        link     = link - 1;
-        rowind[i] = link;
+    // Normalize columns
+    csc_normalize_columns(NODES, EDGES, val, colptr, readsum);
 
-        if (i == 0) {
-            colmatch = colindex;
-            localsum = 1;
-        } else if (colmatch == colindex) {
-            localsum += 1;
-        } else {
-            readsum[colmatch] = localsum;
-            for (c = colmatch + 1; c <= colindex; c++) {
-                colptr[c] = colptr[colmatch] + localsum;
-            }
-            localsum = 1;
-            colmatch = colindex;
-        }
-        val[i] = 1.0;
-    }
-    if (EDGES > 0) {
-        readsum[colmatch] = localsum;
-        for (c = colmatch + 1; c <= NODES; c++) {
-            colptr[c] = EDGES;
-        }
-    }
-    fclose(fp);
-
-    // Column normalization
-    index = 0;
-    for (i = 0; i < NODES; i++) {
-        co = readsum[i];
-        for (j = index; j < index + co; j++) {
-            val[j] = val[j] / co;
-        }
-        index += co;
-    }
+    // Initialize PageRank vector
+    pagerank_init_vector(NODES, prold);
 
     if (rank == MASTER) {
+        printf("Initialization complete\n");
         printf("val, rowind and colptr have been populated\n");
     }
 
     // Compute column distribution among processes
-    for (i = 0; i < NPROC; i++) {
-        if (i == 0) {
-            pcols[i] = NODES / NPROC + NODES % NPROC;
-            displs_pr[i] = 0;
-        } else {
-            pcols[i] = NODES / NPROC;
-            displs_pr[i] = pcols[i - 1] + displs_pr[i - 1];
-        }
-    }
+    compute_column_distribution(NODES, NPROC, pcols, displs_pr);
 
-    // Compute non-zero element counts and displacements for irregular distribution
-    j = 0;
-    for (i = 0; i < NPROC; i++) {
-        j = j + pcols[i];
-        k = j - pcols[i];
-        sendcnts[i] = colptr[j] - colptr[k];
-        if (i == 0) {
-            displs[i] = 0;
-        } else {
-            displs[i] = sendcnts[i - 1] + displs[i - 1];
-        }
-    }
+    // Compute non-zero element counts and displacements
+    compute_nnz_distribution(NPROC, pcols, colptr, sendcnts, displs);
 
     // Allocate local receive buffers
     double *rec_val = (double*)malloc(sendcnts[rank] * sizeof(double));
@@ -171,10 +98,9 @@ int main(int argc, char *argv[])
         MPI_Scatterv(prold, pcols, displs_pr, MPI_DOUBLE, rec_pr, pcols[rank], MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
         // Local sparse matrix-vector multiplication
-        int global_col_start = (rank == MASTER) ? 0 : displs_pr[rank];
+        int global_col_start = displs_pr[rank];
 
-        int local_col;
-        for (local_col = 0; local_col < rec_col; local_col++) {
+        for (int local_col = 0; local_col < rec_col; local_col++) {
             int global_col = global_col_start + local_col;
             int start_idx  = colptr[global_col] - displs[rank];
             int end_idx    = colptr[global_col + 1] - displs[rank];
@@ -189,25 +115,12 @@ int main(int argc, char *argv[])
 
         // Master applies damping, dangling nodes redistribution, and computes convergence
         if (rank == MASTER) {
-            double dangling_mass = 0.0;
-            for (i = 0; i < NODES; i++) {
-                if (readsum[i] == 0) {
-                    dangling_mass += prold[i];
-                }
-            }
-
+            double dangling_mass = pagerank_compute_dangling_mass(NODES, prold, readsum);
             double redistribution = (dangling_mass * DAMPING) / NODES;
 
-            for (i = 0; i < NODES; i++) {
-                prnew[i] = prnew[i] * damp1[i] + damp2[i] + redistribution;
-            }
-
             double norm_sq = 0.0;
-            for (i = 0; i < NODES; i++) {
-                diff[i] = prnew[i] - prold[i];
-                norm_sq += diff[i] * diff[i];
-                prold[i] = prnew[i];
-            }
+            pagerank_update_and_norm_range(prnew, prold, 0, NODES,
+                                           redistribution, DAMPING, NODES, &norm_sq);
             norm = sqrt(norm_sq);
         }
 
@@ -220,19 +133,24 @@ int main(int argc, char *argv[])
     double time_spent = end - begin;
 
     if (rank == MASTER) {
-        double sum_pr = 0;
-        for (i = 0; i < NODES; i++) sum_pr += prnew[i];
+        double sum_pr = pagerank_validate(NODES, prnew);
 
         printf("\n=============================================\n");
         printf("VERIFICA MATEMATICA VETTORE PAGERANK:\n");
         printf("Somma totale di tutti gli elementi: %.10f\n", sum_pr);
         printf("=============================================\n");
         printf("Time taken for power iteration solution: %f seconds\n", time_spent);
+
+        /*
+        for( i = 0; i < NODES; i++) {
+            printf("Node %d: PageRank = %.10f\n", i, prnew[i]);
+        }
+        */
     }
 
     // Free memory
     free(val); free(rowind); free(colptr); free(readsum);
-    free(prold); free(prnew); free(damp1); free(damp2); free(diff); free(sum);
+    free(prold); free(prnew); free(sum);
     free(sendcnts); free(displs); free(pcols); free(displs_pr);
     free(rec_val); free(rec_row); free(rec_pr);
 

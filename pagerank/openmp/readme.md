@@ -107,7 +107,7 @@ Il tempo ottimale si ottiene con un numero di thread inferiore ai core fisici (t
 - La memoria privata deve essere azzerata a ogni iterazione
 
 ## Comando di Compilazione ed Esecuzione
-gcc -fopenmp -O2 -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c libraries/data.c libraries/measure.c -Ilibraries -lm
+gcc -fopenmp -O2 -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -Ilibraries -lm
 ./openmp/pr_openmp_opt 4
 
 ## Note sulle Prestazioni
