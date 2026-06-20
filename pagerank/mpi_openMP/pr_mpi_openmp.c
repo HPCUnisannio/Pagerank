@@ -113,10 +113,6 @@ int main(int argc, char **argv)
     double dangling_mass = 0.0;
     double norm_sq = 0.0;
 
-    // Profiling timers
-    double t_scatter = 0.0, t_spmv = 0.0, t_reduce_mpi = 0.0;
-    double t_postproc = 0.0, t_bcast = 0.0;
-
     // Private sum vectors for each OpenMP thread
     double **thread_sums = (double **)calloc(num_threads, sizeof(double *));
 
@@ -142,14 +138,10 @@ int main(int argc, char **argv)
                 }
                 norm = 0.0;
 
-                double t0 = MPI_Wtime();
                 MPI_Scatterv(prold, pcols, displs_pr, MPI_DOUBLE,
                              rec_pr, pcols[rank], MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
-                t_scatter += MPI_Wtime() - t0;
             }
             #pragma omp barrier
-
-            double t1 = MPI_Wtime();
 
             // Parallel SpMV with privatized local_sum per thread
             int global_col_start = displs_pr[rank];
@@ -167,22 +159,26 @@ int main(int argc, char **argv)
             }
 
             // Reduce thread-local sums into process sum array
-            reduce_thread_sums(NODES, num_threads, thread_sums, sum);
-
-            t_spmv += MPI_Wtime() - t1;
+            #pragma omp for
+            for (i = 0; i < NODES; i++) {
+                double total_row_sum = 0.0;
+                int t;
+                for (t = 0; t < num_threads; t++) {
+                    if (thread_sums[t] != NULL)
+                        total_row_sum += thread_sums[t][i];
+                }
+                sum[i] = total_row_sum;
+            }
 
             // MPI reduction: only master thread participates
             #pragma omp master
             {
-                double t2 = MPI_Wtime();
                 MPI_Reduce(sum, prnew, NODES, MPI_DOUBLE, MPI_SUM, MASTER, MPI_COMM_WORLD);
-                t_reduce_mpi += MPI_Wtime() - t2;
             }
             #pragma omp barrier
 
             // Post-processing: only master process executes
             if (rank == MASTER) {
-                double t_post = MPI_Wtime();
 
                 #pragma omp for reduction(+ : dangling_mass)
                 for (i = 0; i < NODES; i++) {
@@ -201,8 +197,6 @@ int main(int argc, char **argv)
                     norm_sq += diff * diff;
                     prold[i] = prnew[i];
                 }
-
-                t_postproc += MPI_Wtime() - t_post;
             }
 
             // Broadcast convergence norm
@@ -211,23 +205,11 @@ int main(int argc, char **argv)
                 if (rank == MASTER) {
                     norm = sqrt(norm_sq);
                 }
-                double t3 = MPI_Wtime();
                 MPI_Bcast(&norm, 1, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
-                t_bcast += MPI_Wtime() - t3;
             }
             #pragma omp barrier
 
         } while (norm > ERROR);
-
-        #pragma omp master
-        if (rank == MASTER) {
-            printf("\n--- PROFILO TEMPO (totale su tutte le iterazioni) ---\n");
-            printf("  MPI_Scatterv  : %.4f s\n", t_scatter);
-            printf("  SpMV+riduzione: %.4f s\n", t_spmv);
-            printf("  MPI_Reduce    : %.4f s\n", t_reduce_mpi);
-            printf("  Post-proc     : %.4f s\n", t_postproc);
-            printf("  MPI_Bcast     : %.4f s\n", t_bcast);
-        }
 
         free(local_sum);
     }

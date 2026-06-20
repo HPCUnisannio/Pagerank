@@ -129,10 +129,6 @@ int main(int argc, char **argv)
     double norm = 0.0;
     double dm_local = 0.0, dm_global = 0.0, norm_sq_local = 0.0;
 
-    // Profiling timers
-    double t_spmv = 0.0, t_thread_red = 0.0, t_allreduce_prnew = 0.0;
-    double t_update = 0.0, t_norm = 0.0;
-
     // Private sum vectors for each OpenMP thread
     double **thread_sums = (double **)calloc(num_threads, sizeof(double *));
 
@@ -144,7 +140,6 @@ int main(int argc, char **argv)
         int tid = omp_get_thread_num();
         thread_sums[tid] = (double *)calloc(NODES, sizeof(double));
         double *local_sum = thread_sums[tid];
-        double t_phase = 0.0;
 
         do {
             memset(local_sum, 0, NODES * sizeof(double));
@@ -158,9 +153,6 @@ int main(int argc, char **argv)
             int global_col_start = displs_pr[rank];
 
             // Phase A: Parallel sparse matrix-vector multiplication
-            #pragma omp master
-            t_phase = MPI_Wtime();
-
             int local_col;
             #pragma omp for schedule(dynamic, 512)
             for (local_col = 0; local_col < rec_col; local_col++) {
@@ -172,60 +164,62 @@ int main(int argc, char **argv)
                 }
             }
 
-            #pragma omp master
-            t_spmv += MPI_Wtime() - t_phase;
-
             // Phase B: Reduce thread-local sums into process sum array
-            #pragma omp master
-            t_phase = MPI_Wtime();
-
-            reduce_thread_sums(NODES, num_threads, thread_sums, sum);
-
-            #pragma omp master
-            t_thread_red += MPI_Wtime() - t_phase;
+            #pragma omp for
+            for (i = 0; i < NODES; i++) {
+                double total_row_sum = 0.0;
+                int t;
+                for (t = 0; t < num_threads; t++) {
+                    if (thread_sums[t] != NULL)
+                        total_row_sum += thread_sums[t][i];
+                }
+                sum[i] = total_row_sum;
+            }
 
             // Phase C: Asynchronous MPI reduction with overlap
             MPI_Request request;
             #pragma omp master
             {
-                t_phase = MPI_Wtime();
                 MPI_Iallreduce(sum, prnew, NODES, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &request);
             }
 
             // Compute local dangling mass while network is working
-            dm_local = pagerank_compute_dangling_mass_range(prold, readsum,
-                                                            global_col_start,
-                                                            global_col_start + rec_col);
+            #pragma omp for reduction(+ : dm_local)
+            for (i = 0; i < rec_col; i++) {
+                int global_col = global_col_start + i;
+                if (readsum[global_col] == 0) {
+                    dm_local += prold[global_col];
+                }
+            }
 
             #pragma omp master
             {
                 MPI_Allreduce(&dm_local, &dm_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
                 MPI_Wait(&request, MPI_STATUS_IGNORE);
-                t_allreduce_prnew += MPI_Wtime() - t_phase;
             }
             #pragma omp barrier
 
             double redistribution = dm_global * DAMPING / NODES;
 
             // Phase D: Distributed update and local norm computation
-            #pragma omp master
-            t_phase = MPI_Wtime();
+            #pragma omp for reduction(+ : norm_sq_local)
+            for (i = 0; i < rec_col; i++) {
+                int global_col = global_col_start + i;
 
-            pagerank_update_and_norm_range(prnew, prold,
-                                           global_col_start, global_col_start + rec_col,
-                                           redistribution, DAMPING, NODES, &norm_sq_local);
+                prnew[global_col] = prnew[global_col] * DAMP1 + DAMP2 + redistribution;
 
-            #pragma omp master
-            t_update += MPI_Wtime() - t_phase;
+                double diff = prnew[global_col] - prold[global_col];
+                norm_sq_local += diff * diff;
+
+                prold[global_col] = prnew[global_col];
+            }
 
             // Phase E: Global convergence check
             #pragma omp master
             {
-                t_phase = MPI_Wtime();
                 double norm_sq_global = 0.0;
                 MPI_Allreduce(&norm_sq_local, &norm_sq_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
                 norm = sqrt(norm_sq_global);
-                t_norm += MPI_Wtime() - t_phase;
             }
             #pragma omp barrier
 
@@ -238,17 +232,6 @@ int main(int argc, char **argv)
     // ========================================================================
     // PROFILING
     // ========================================================================
-    if (rank == MASTER) {
-        double t_total = t_spmv + t_thread_red + t_allreduce_prnew + t_update + t_norm;
-        printf("\n--- PROFILO TEMPO (totale su tutte le iterazioni) ---\n");
-        printf("  SpMV locale      : %7.3f s  (%5.1f%%)\n", t_spmv, 100.0 * t_spmv / t_total);
-        printf("  Riduzione thread : %7.3f s  (%5.1f%%)\n", t_thread_red, 100.0 * t_thread_red / t_total);
-        printf("  Allreduce+attesa : %7.3f s  (%5.1f%%)\n", t_allreduce_prnew, 100.0 * t_allreduce_prnew / t_total);
-        printf("  Aggiornamento    : %7.3f s  (%5.1f%%)\n", t_update, 100.0 * t_update / t_total);
-        printf("  Norma MPI        : %7.3f s  (%5.1f%%)\n", t_norm, 100.0 * t_norm / t_total);
-        printf("  Totale misurato  : %7.3f s\n", t_total);
-    }
-
     MPI_Barrier(MPI_COMM_WORLD);
     double end = MPI_Wtime();
     double time_spent = end - begin;
