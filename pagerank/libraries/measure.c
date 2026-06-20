@@ -66,21 +66,14 @@ double measure_load_balance(double max_local_time, double avg_local_time) {
 
 /* ===== UTILITY FUNCTIONS ===== */
 
-void measure_print_summary(const char *label, double execution_time, 
-                           int nodes, int iterations) {
+void measure_print_summary(const char *label, double setup_time, double compute_time, double total_time) {
     printf("\n");
     printf("╔════════════════════════════════════════════════════════════╗\n");
     printf("║  EXECUTION SUMMARY: %s\n", label);
     printf("╠════════════════════════════════════════════════════════════╣\n");
-    printf("║  Execution Time:     %.6f seconds\n", execution_time);
-    printf("║  Graph Nodes:        %d\n", nodes);
-    printf("║  Iterations:         %d\n", iterations);
-    
-    if (nodes > 0 && iterations > 0) {
-        double ops_per_sec = (double)(nodes * nodes) * iterations / execution_time;
-        printf("║  Throughput:         %.2e operations/sec\n", ops_per_sec);
-    }
-    
+    printf("║  Setup Time:       %.6f seconds\n", setup_time);
+    printf("║  Compute Time:     %.6f seconds\n", compute_time);
+    printf("║  Total Time:       %.6f seconds\n", total_time);
     printf("╚════════════════════════════════════════════════════════════╝\n");
     printf("\n");
 }

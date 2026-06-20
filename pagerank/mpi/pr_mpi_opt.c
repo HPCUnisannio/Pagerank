@@ -66,8 +66,15 @@ int main(int argc, char *argv[])
     pagerank_init_vector(NODES, prold);
 
     // ========================================================================
-    // 1. FILE READING AND CSC CONSTRUCTION (MASTER ONLY)
+    // PHASE 1: SETUP (Master measures, all synchronized at end)
     // ========================================================================
+    double t_setup_start, t_setup_end, setup_time;
+
+    if (rank == MASTER) {
+        t_setup_start = MPI_Wtime();
+    }
+
+    // 1a. FILE READING AND CSC CONSTRUCTION (MASTER ONLY)
     if (rank == MASTER) {
         val    = (double*)calloc(EDGES, sizeof(double));
         rowind = (int*)calloc(EDGES, sizeof(int));
@@ -78,13 +85,9 @@ int main(int argc, char *argv[])
 
         // Column normalization
         csc_normalize_columns(NODES, EDGES, val, colptr, readsum);
-
-        printf("CSC costruita e normalizzata --> Inizio Distribuzione Rete\n");
     }
 
-    // ========================================================================
-    // 2. DISTRIBUTE GRAPH METADATA AND CSC PORTIONS
-    // ========================================================================
+    // 1b. DISTRIBUTE GRAPH METADATA AND CSC PORTIONS
     MPI_Bcast(colptr, NODES + 1, MPI_INT, MASTER, MPI_COMM_WORLD);
     MPI_Bcast(readsum, NODES, MPI_INT, MASTER, MPI_COMM_WORLD);
 
@@ -110,14 +113,25 @@ int main(int argc, char *argv[])
         free(rowind);
     }
 
-    // ========================================================================
-    // 3. POWER ITERATION CORE
-    // ========================================================================
+    // Synchronize: ensure ALL processes have completed setup
     MPI_Barrier(MPI_COMM_WORLD);
-    double begin = MPI_Wtime();
-    double norm = 0.0;
 
+    double t_compute_start, t_compute_end, compute_time;
+    if (rank == MASTER) {
+        t_setup_end = MPI_Wtime();
+        setup_time = t_setup_end - t_setup_start;
+        printf("Setup complete\n");
+        printf("CSC costruita e normalizzata --> Inizio Distribuzione Rete\n");
+        t_compute_start = t_setup_end; // Start compute timer immediately after setup
+    }
+
+    // ========================================================================
+    // PHASE 2: COMPUTATION (Master measures, all synchronized at both ends)
+    // ========================================================================
+
+    double norm = 0.0;
     double dm_local, dm_global, norm_sq_local, norm_sq_global;
+    int iteration_count = 0;
 
     do {
         memset(local_sum, 0, NODES * sizeof(double));
@@ -127,7 +141,8 @@ int main(int argc, char *argv[])
         int global_col_start = displs_pr[rank];
 
         // Phase A: Local sparse matrix-vector multiplication
-        for (int local_col = 0; local_col < rec_col; local_col++) {
+        int local_col;
+        for (local_col = 0; local_col < rec_col; local_col++) {
             int global_col = global_col_start + local_col;
             int start_idx  = colptr[global_col] - displs[rank];
             int end_idx    = colptr[global_col + 1] - displs[rank];
@@ -160,15 +175,20 @@ int main(int argc, char *argv[])
         // Phase D: Convergence evaluation
         MPI_Allreduce(&norm_sq_local, &norm_sq_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         norm = sqrt(norm_sq_global);
+        iteration_count++;
 
     } while (norm > ERROR);
 
+    // Synchronize: ensure ALL processes have exited the loop
     MPI_Barrier(MPI_COMM_WORLD);
-    double end = MPI_Wtime();
-    double time_spent = end - begin;
+
+    if (rank == MASTER) {
+        t_compute_end = MPI_Wtime();
+        compute_time = t_compute_end - t_compute_start;
+    }
 
     // ========================================================================
-    // 4. FINAL GATHERING AND VALIDATION
+    // PHASE 3: FINAL GATHERING AND VALIDATION
     // ========================================================================
     double *full_pr = (double*)malloc(NODES * sizeof(double));
 
@@ -178,12 +198,32 @@ int main(int argc, char *argv[])
 
     if (rank == MASTER) {
         double sum_pr = pagerank_validate(NODES, full_pr);
-
-        printf("\n=============================================\n");
-        printf("VERIFICA MATEMATICA VETTORE PAGERANK:\n");
-        printf("Somma totale di tutti gli elementi: %.10f\n", sum_pr);
-        printf("Tempo puro di Iterazione: %f secondi\n", time_spent);
         printf("=============================================\n");
+        printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
+        printf("=============================================\n");
+
+        // Print execution summary
+        char label[50];
+        sprintf(label, "MPI OPT (%d proc)", NPROC);
+        double total_time = t_compute_end - t_setup_start;
+        measure_print_summary(label, setup_time, compute_time, total_time);
+
+        // Read sequential time for comparison
+        double sequential_time = 0.0;
+        FILE *time_file = fopen("sequential/sequential_time.txt", "r");
+        if (time_file) {
+            fscanf(time_file, "%lf", &sequential_time);
+            fclose(time_file);
+            
+            char label1[30];
+            sprintf(label1, "Sequenziale");
+            char label2[30];
+            sprintf(label2, "MPI Opt (%d proc)", NPROC);
+            
+            measure_print_comparison(label1, sequential_time, label2, compute_time);
+        } else {
+            printf("Run sequential version first to generate the baseline.\n");
+        }
 
         /*
         for(i = 0; i < NODES; i++) {

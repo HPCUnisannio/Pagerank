@@ -66,15 +66,29 @@ Compilazione:
 
 mpicc mpi/pr_mpi.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi/pr_mpi -Ilibraries -lm
 
+mpecc -mpilog -lpthread -o mpi/pr_mpi -Ilibraries -lm mpi/pr_mpi.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c
+
+for i in {1..6}; do   mpirun -np 1 -machinefile mpi/machinefile.txt mpi/pr_mpi; done
+for i in {1..6}; do   mpirun -np 4 -machinefile mpi/machinefile.txt mpi/pr_mpi;   mv mpi/pr_mpi.clog2 mpi/clogs/prc_4_$i.clog2; done
+
+for i in {1..6}; do   mpirun -np 17 --mca btl self,tcp --mca btl_tcp_if_include em2 -machinefile mpi/machinefile.txt mpi/pr_mpi; done
+for i in {1..6}; do   mpirun -np 17 --mca btl self,tcp --mca btl_tcp_if_include ib0 -machinefile mpi/machinefile.txt mpi/pr_mpi; done
+
 Esecuzione (con 4 processi):
 
 mpirun -np 4 -machinefile mpi/machinefile.txt mpi/pr_mpi
+mpirun -np 17 --mca btl self,tcp --mca btl_tcp_if_include em2 -machinefile mpi/machinefile.txt mpi/pr_mpi
+mpirun -np 17 --mca btl self,tcp --mca btl_tcp_if_include ib0 -machinefile mpi/machinefile.txt mpi/pr_mpi
 
 ### Versione Ottimizzata
 
 Compilazione:
 
 mpicc mpi/pr_mpi_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi/pr_mpi_opt -Ilibraries -lm
+
+for i in {1..6}; do   mpirun -np 1 -machinefile mpi/machinefile.txt mpi/pr_mpi_opt; done
+for i in {1..6}; do   mpirun -np 17 --mca btl self,tcp --mca btl_tcp_if_include em2 -machinefile mpi/machinefile.txt mpi/pr_mpi_opt; done
+for i in {1..6}; do   mpirun -np 17 --mca btl self,tcp --mca btl_tcp_if_include ib0 -machinefile mpi/machinefile.txt mpi/pr_mpi_opt; done
 
 Esecuzione (con 4 processi):
 

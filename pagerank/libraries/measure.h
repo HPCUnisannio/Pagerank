@@ -87,12 +87,11 @@ double measure_load_balance(double max_local_time, double avg_local_time);
 /**
  * Print a formatted performance summary
  * @param label Name of the execution (e.g., "Sequential", "Parallel with 4 threads")
- * @param execution_time Time taken for execution
- * @param nodes Number of nodes in the graph
- * @param iterations Number of PageRank iterations
+ * @param setup_time Time taken for setup phase
+ * @param compute_time Time taken for computation phase
+ * @param total_time Total execution time (setup + compute)
  */
-void measure_print_summary(const char *label, double execution_time, 
-                           int nodes, int iterations);
+void measure_print_summary(const char *label, double setup_time, double compute_time, double total_time);
 
 /**
  * Compare two execution times and print comparison

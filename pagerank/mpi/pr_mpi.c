@@ -52,7 +52,12 @@ int main(int argc, char *argv[])
     double norm;
     int rec_col;
 
-    // Build CSC matrix from file (all processes read)
+    double t_setup_start, t_setup_end, setup_time;
+    // Phase 1: Setup - Build CSC matrix from file (all processes read)
+    if (rank == MASTER) {
+        t_setup_start = MPI_Wtime();
+    }
+    
     if (csc_build_from_file(FILEPATH, NODES, EDGES, val, rowind, colptr, readsum) != 0) {
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
@@ -62,11 +67,6 @@ int main(int argc, char *argv[])
 
     // Initialize PageRank vector
     pagerank_init_vector(NODES, prold);
-
-    if (rank == MASTER) {
-        printf("Initialization complete\n");
-        printf("val, rowind and colptr have been populated\n");
-    }
 
     // Compute column distribution among processes
     compute_column_distribution(NODES, NPROC, pcols, displs_pr);
@@ -84,8 +84,16 @@ int main(int argc, char *argv[])
     MPI_Scatter(pcols, 1, MPI_INT, &rec_col, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Scatterv(rowind, sendcnts, displs, MPI_INT, rec_row, sendcnts[rank], MPI_INT, 0, MPI_COMM_WORLD);
 
+    // Phase 2: Power iteration (computation)
     MPI_Barrier(MPI_COMM_WORLD);
-    double begin = MPI_Wtime();
+    double t_compute_start, t_compute_end, compute_time;
+    if (rank == MASTER) {
+        t_setup_end = MPI_Wtime();
+        setup_time = t_setup_end - t_setup_start;
+        printf("Setup complete\n");
+        printf("val, rowind and colptr have been populated\n");
+        t_compute_start = t_setup_end;
+    }
 
     do {
         memset(sum, 0, NODES * sizeof(double));
@@ -100,7 +108,8 @@ int main(int argc, char *argv[])
         // Local sparse matrix-vector multiplication
         int global_col_start = displs_pr[rank];
 
-        for (int local_col = 0; local_col < rec_col; local_col++) {
+        int local_col;
+        for (local_col = 0; local_col < rec_col; local_col++) {
             int global_col = global_col_start + local_col;
             int start_idx  = colptr[global_col] - displs[rank];
             int end_idx    = colptr[global_col + 1] - displs[rank];
@@ -129,20 +138,44 @@ int main(int argc, char *argv[])
 
     } while (norm > ERROR);
 
-    double end = MPI_Wtime();
-    double time_spent = end - begin;
+    // Synchronize: ensure ALL processes have exited the loop
+    MPI_Barrier(MPI_COMM_WORLD);
 
+    // Phase 3: Validation and output (Master only)
     if (rank == MASTER) {
+        t_compute_end = MPI_Wtime();
+        
         double sum_pr = pagerank_validate(NODES, prnew);
-
-        printf("\n=============================================\n");
-        printf("VERIFICA MATEMATICA VETTORE PAGERANK:\n");
-        printf("Somma totale di tutti gli elementi: %.10f\n", sum_pr);
         printf("=============================================\n");
-        printf("Time taken for power iteration solution: %f seconds\n", time_spent);
+        printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
+        printf("=============================================\n");
+
+        // Print execution summary
+        char label[100];
+        sprintf(label, "MPI BASE (%d processes)", NPROC);
+        compute_time = t_compute_end - t_compute_start;
+        double total_time = t_compute_end - t_setup_start;
+        measure_print_summary(label, setup_time, compute_time, total_time);
+
+        // Read sequential time for comparison
+        double sequential_time = 0.0;
+        FILE *time_file = fopen("sequential/sequential_time.txt", "r");
+        if (time_file) {
+            fscanf(time_file, "%lf", &sequential_time);
+            fclose(time_file);
+            
+            char label1[30];
+            sprintf(label1, "Sequenziale");
+            char label2[30];
+            sprintf(label2, "MPI Base (%d proc)", NPROC);
+            
+            measure_print_comparison(label1, sequential_time, label2, compute_time);
+        } else {
+            printf("\nNote: 'sequential_time.txt' not found. Run sequential version first.\n");
+        }
 
         /*
-        for( i = 0; i < NODES; i++) {
+        for(i = 0; i < NODES; i++) {
             printf("Node %d: PageRank = %.10f\n", i, prnew[i]);
         }
         */
