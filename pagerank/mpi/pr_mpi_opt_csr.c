@@ -142,9 +142,14 @@ int main(int argc, char *argv[])
     int global_row_end   = global_row_start + rec_row;
 
     // Innesco (Bootstrap) della Dangling Mass per l'iterazione zero (k=0)
-    dm_local = pagerank_compute_dangling_mass_range(prold, out_degree,
-                                                    global_row_start, global_row_end);
-    MPI_Allreduce(&dm_local, &dm_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    int total_dangling_nodes = 0;
+    int i;
+    for (i = 0; i < NODES; i++) {
+        if (out_degree[i] == 0) {
+            total_dangling_nodes++;
+        }
+    }
+    dm_global = (double) total_dangling_nodes / NODES;
 
     do {
         norm_sq_local = 0.0;
