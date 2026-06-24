@@ -166,4 +166,10 @@ double pagerank_validate(int NODES, double *pr);
  */
 void reduce_thread_sums(int NODES, int num_threads, double **thread_sums, double *sum);
 
+int csr_build_from_file(const char *filepath, int NODES, int EDGES,
+                        double *val, int *colind, int *rowptr, int *out_degree);
+
+void csr_spmv_range(double *val, int *colind, int *rowptr, double *prold,
+                    double *prnew, int row_start, int row_end, int displ);
+
 #endif /* PAGERANK_UTILS_H */
