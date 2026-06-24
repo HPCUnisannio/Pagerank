@@ -63,6 +63,8 @@ int main(int argc, char *argv[])
     int *displs_pr = malloc(NPROC * sizeof(int));
     int rec_row;
 
+    double dm_global = 0.0;
+
     // Inizializzazione uniforme del vettore PageRank
     pagerank_init_vector(NODES, prold);
 
@@ -86,10 +88,23 @@ int main(int argc, char *argv[])
         if (csr_build_from_file(FILEPATH, NODES, EDGES, val, colind, rowptr, out_degree) != 0) {
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
+
+        // Innesco (Bootstrap) della Dangling Mass per l'iterazione zero (k=0)
+        int total_dangling_nodes = 0;
+        int i;
+        for (i = 0; i < NODES; i++) {
+            if (out_degree[i] == 0) {
+                total_dangling_nodes++;
+            }
+        }
+        dm_global = (double) total_dangling_nodes / NODES;
     }
 
     // 1b. Broadcast ACCORPATO dei metadati strutturali (Unica chiamata di rete)
     MPI_Bcast(metadata_buffer, (2 * NODES + 1), MPI_INT, MASTER, MPI_COMM_WORLD);
+
+    // Invia il valore di dm_global iniziale a tutti i processi
+    MPI_Bcast(&dm_global, 1, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
 
     // Calcolo della distribuzione bilanciata delle RIGHE del grafo tra i processi
     compute_column_distribution(NODES, NPROC, prows, displs_pr);
@@ -135,21 +150,11 @@ int main(int argc, char *argv[])
     // ========================================================================
 
     double norm = 0.0;
-    double dm_local = 0.0, dm_global = 0.0, norm_sq_local = 0.0;
+    double dm_local = 0.0, norm_sq_local = 0.0;
     int iteration_count = 0;
 
     int global_row_start = displs_pr[rank];
     int global_row_end   = global_row_start + rec_row;
-
-    // Innesco (Bootstrap) della Dangling Mass per l'iterazione zero (k=0)
-    int total_dangling_nodes = 0;
-    int i;
-    for (i = 0; i < NODES; i++) {
-        if (out_degree[i] == 0) {
-            total_dangling_nodes++;
-        }
-    }
-    dm_global = (double) total_dangling_nodes / NODES;
 
     do {
         norm_sq_local = 0.0;
