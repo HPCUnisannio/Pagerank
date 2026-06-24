@@ -6,7 +6,6 @@
 #include "../libraries/measure.h"
 #include "../libraries/pagerank_utils.h"
 
-#define DAMPING 0.85
 #define ERR     0.00001
 
 double sqrt(double x);
@@ -32,6 +31,12 @@ int main(int argc, char *argv[])
     double *prold = (double *) malloc(NODES * sizeof(double));
     double *prnew = (double *) calloc(NODES, sizeof(double));
 
+    // Damping arrays
+    double *damp1 = (double *) malloc(NODES * sizeof(double));
+    double *damp2 = (double *) malloc(NODES * sizeof(double));
+
+    double *diff = (double *) malloc(NODES * sizeof(double));
+
     double norm, norm_sq;
 
     if (!val || !rowind || !colptr || !prold || !prnew || !sum) {
@@ -51,7 +56,12 @@ int main(int argc, char *argv[])
     csc_normalize_columns(NODES, EDGES, val, colptr, sum);
 
     // Initialize PageRank vector
-    pagerank_init_vector(NODES, prold);
+    for(int i = 0; i < NODES; i++) {
+        prold[i] = 1.0 / NODES;
+        damp1[i] = 0.85;
+        damp2[i] = 0.15 / NODES;
+    }
+
     double t_setup_end = get_time();
     double setup_time = t_setup_end - t_setup_start;
 
@@ -59,23 +69,35 @@ int main(int argc, char *argv[])
 
     // Power iteration
     double t_compute_start = get_time();
+
+    int col, i, j;
     
     do {
         memset(prnew, 0, NODES * sizeof(double));
 
         // Compute dangling mass and redistribution
         double dangling_mass = pagerank_compute_dangling_mass(NODES, prold, sum);
-        double redistribution = (dangling_mass * DAMPING) / NODES;
 
-        // Sparse matrix-vector multiplication
-        csc_spmv_range(val, rowind, colptr, prold, prnew, 0, NODES, 0);
+        norm = 0.0;
+		for(col = 0; col<NODES; col++) {
+			for(j=colptr[col]; j<colptr[col+1]; j++) {
+				prnew[rowind[j]] += val[j]*prold[col];
+			}
+		}
 
-        // Apply damping, teleportation, redistribution, compute norm, and update prold
-        norm_sq = 0.0;
-        pagerank_update_and_norm_range(prnew, prold, 0, NODES, redistribution,
-                                       DAMPING, NODES, &norm_sq);
+		for(i = 0; i<NODES; i++) {
+			prnew[i] = prnew[i]*damp1[i]+damp2[i];
+		}
 
-        norm = sqrt(norm_sq);
+        //norm calculation and vector copying from new to old
+		norm_sq = 0.0;
+		for(i=0; i<NODES;i++) {
+			diff[i] = prnew[i] - prold[i];
+			norm_sq += diff[i]*diff[i]; //l2 norm || prnew-prold ||
+			prold[i] = prnew[i];
+		}
+
+	    norm = sqrt(norm_sq);
 
     } while (norm > ERR);
 
@@ -87,7 +109,11 @@ int main(int argc, char *argv[])
     measure_print_summary("SEQUENTIAL BASELINE", setup_time, compute_time, total_time);
 
     // Validate PageRank sum equals 1.0
-    double sum_pr = pagerank_validate(NODES, prnew);
+    double sum_pr = 0.0;
+    for (i = 0; i < NODES; i++) {
+        sum_pr += prnew[i];
+    }
+
     printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
     printf("=============================================\n");
 
@@ -112,6 +138,9 @@ int main(int argc, char *argv[])
     free(prold);
     free(prnew);
     free(sum);
+    free(damp1);
+    free(damp2);
+    free(diff);
 
     return 0;
 }

@@ -22,7 +22,7 @@ static const Graph MEDIUM = {
 static const Graph BIGGEST = {
     .nodes = 4847571,
     .edges = 68993773,
-    .filepath = "dataset/data3.txt"
+    .filepath = "dataset/data3.dat"
 };
 
 const Graph* get_graph(GraphType type) {

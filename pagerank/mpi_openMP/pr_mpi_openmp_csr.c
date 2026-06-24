@@ -74,6 +74,8 @@ int main(int argc, char **argv)
     int *displs_pr = malloc(NPROC * sizeof(int));
     int rec_row;
 
+    double dm_global = 0.0;
+
     // Inizializzazione uniforme del vettore PageRank
     pagerank_init_vector(NODES, prold);
 
@@ -96,7 +98,16 @@ int main(int argc, char **argv)
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
         printf("CSR costruita e normalizzata centralmente --> Distribuzione dati\n");
-        fflush(stdout);
+        
+        int i;
+        // Bootstrap iniziale fuori dal loop per la Delayed Dangling Mass
+        #pragma omp parallel for reduction(+:dm_global)
+        for (i = 0; i < NODES; i++) {
+            if (out_degree[i] == 0) {
+                dm_global += 1.0;
+            }
+        }
+        dm_global /= NODES;
     }
 
     // ========================================================================
@@ -104,6 +115,9 @@ int main(int argc, char **argv)
     // ========================================================================
     // Broadcast ACCORPATO dei metadati strutturali (Unica chiamata di rete)
     MPI_Bcast(metadata_buffer, (2 * NODES + 1), MPI_INT, MASTER, MPI_COMM_WORLD);
+
+    // Invia il valore di dm_global iniziale a tutti i processi
+    MPI_Bcast(&dm_global, 1, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
 
     // Calcolo della distribuzione bilanciata delle righe del grafo
     compute_column_distribution(NODES, NPROC, prows, displs_pr);
@@ -144,21 +158,11 @@ int main(int argc, char **argv)
 
 
     double norm = 0.0;
-    double dm_local = 0.0, dm_global = 0.0, norm_sq_local = 0.0;
+    double dm_local = 0.0, norm_sq_local = 0.0;
     int iteration_count = 0;
 
     int global_row_start = displs_pr[rank];
     int global_row_end   = global_row_start + rec_row;
-
-    // Bootstrap iniziale fuori dal loop per la Delayed Dangling Mass
-    int i;
-    for (i = global_row_start; i < global_row_end; i++) {
-        if (out_degree[i] == 0) {
-            dm_local += prold[i];
-        }
-    }
-    MPI_Allreduce(&dm_local, &dm_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-    dm_local = 0.0;
 
     // APERTURA REGIONE PARALLELA OPENMP
     #pragma omp parallel
@@ -166,7 +170,7 @@ int main(int argc, char **argv)
         int r, j;
         do {
             // Fase A: SpMV parallela su righe CSR (Nessun conflitto di scrittura)
-            #pragma omp for schedule(guided)
+            #pragma omp for reduction(+:norm_sq_local, dm_local) schedule(guided)
             for (r = global_row_start; r < global_row_end; r++) {
                 int start_idx = rowptr[r] - displs[rank];
                 int end_idx   = rowptr[r + 1] - displs[rank];
@@ -175,13 +179,8 @@ int main(int argc, char **argv)
                 for (j = start_idx; j < end_idx; j++) {
                     row_accum += rec_val[j] * prold[rec_colind[j]];
                 }
-                prnew[r] = row_accum;
-            }
 
-            // Fase B: Update PageRank e Riduzioni native OpenMP
-            #pragma omp for reduction(+:norm_sq_local, dm_local) schedule(static)
-            for (r = global_row_start; r < global_row_end; r++) {
-                prnew[r] = prnew[r] * DAMP1 + DAMP2 + (dm_global * DAMP1 / NODES);
+                prnew[r] = row_accum * DAMP1 + DAMP2 + (dm_global * DAMP1 / NODES);
 
                 double diff = prnew[r] - prold[r];
                 norm_sq_local += diff * diff;
@@ -280,19 +279,16 @@ int main(int argc, char **argv)
                 printf("║  Compute Time:        %12.6f seconds                       ║\n", compute_time);
                 printf("║  Total Time:          %12.6f seconds                       ║\n", total_time);
                 printf("║  Sequential Time:     %12.6f seconds                       ║\n", seq_time);
-                printf("║  MPI Processes:       %12d                                 ║\n", NPROC);
-                printf("║  OpenMP Threads:      %12d                                 ║\n", num_threads);
-                printf("║  Total Threads:       %12d                                 ║\n", NPROC * num_threads);
                 printf("╠════════════════════════════════════════════════════════════════╣\n");
 
                 // Calcolo Speedup ed Efficienza basati sulle tue funzioni di libreria
-                double speedup = measure_speedup(seq_time, total_time);
+                double speedup = measure_speedup(seq_time, compute_time);
                 printf("║  Speedup:             %12.4f x                             ║\n", speedup);
 
                 double efficiency = measure_efficiency(speedup, NPROC * num_threads);
                 printf("║  Efficiency:          %12.2f%%                             ║\n", efficiency * 100.0);
 
-                double improvement = ((seq_time - total_time) / seq_time) * 100.0;
+                double improvement = ((seq_time - compute_time) / seq_time) * 100.0;
                 if (improvement > 0) {
                     printf("║  Improvement:         %+12.2f%%                             ║\n", improvement);
                 } else {
