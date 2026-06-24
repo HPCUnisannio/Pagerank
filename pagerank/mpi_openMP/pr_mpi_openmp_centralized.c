@@ -79,6 +79,7 @@ int main(int argc, char **argv)
     // 1. FILE READING AND CSC CONSTRUCTION (MASTER ONLY)
     // ========================================================================
     if (rank == MASTER) {
+
         val    = (double *)calloc(EDGES, sizeof(double));
         rowind = (int *)calloc(EDGES, sizeof(int));
 

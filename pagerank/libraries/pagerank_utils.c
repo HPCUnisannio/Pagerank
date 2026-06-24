@@ -205,3 +205,97 @@ void reduce_thread_sums(int NODES, int num_threads, double **thread_sums, double
         sum[i] = total;
     }
 }
+
+
+
+
+
+
+
+//======================================================================================================================
+// AGGIUNTE PER VERSIONE CSR
+//======================================================================================================================
+// Aggiungi in pagerank_utils.c
+
+int csr_build_from_file(const char *filepath, int NODES, int EDGES,
+                        double *val, int *colind, int *rowptr, int *out_degree)
+{
+    // Tutte le dichiarazioni rigorosamente in cima al blocco
+    int *in_degree;
+    int *src_edges;
+    int *dst_edges;
+    FILE *fp;
+    int i;
+    int u, v, idx;
+
+    in_degree = (int*)calloc(NODES, sizeof(int));
+    src_edges = (int*)malloc(EDGES * sizeof(int));
+    dst_edges = (int*)malloc(EDGES * sizeof(int));
+
+    fp = fopen(filepath, "r");
+    if (!fp) {
+        fprintf(stderr, "Errore apertura file\n");
+        free(in_degree);
+        free(src_edges);
+        free(dst_edges);
+        return -1;
+    }
+
+    for (i = 0; i < EDGES; i++) {
+        fscanf(fp, "%d %d", &u, &v);
+        u--; v--; // Conversione 0-based
+        src_edges[i] = u;
+        dst_edges[i] = v;
+
+        out_degree[u]++; // Gradi uscenti (serve per normalizzare)
+        in_degree[v]++;  // Gradi entranti (serve per allocare la CSR)
+    }
+    fclose(fp);
+
+    // Costruzione del vettore rowptr (puntatori di riga)
+    rowptr[0] = 0;
+    for (i = 0; i < NODES; i++) {
+        rowptr[i+1] = rowptr[i] + in_degree[i];
+        in_degree[i] = 0; // Lo azzeriamo per riutilizzarlo come offset nel ciclo successivo
+    }
+
+    // Popolamento di colind e val
+    for (i = 0; i < EDGES; i++) {
+        u = src_edges[i];
+        v = dst_edges[i];
+        idx = rowptr[v] + in_degree[v]; // Troviamo la posizione corretta per la destinazione
+
+        colind[idx] = u;
+        // Normalizzazione immediata: il peso del link dipende dal grado uscente del nodo sorgente
+        val[idx] = 1.0 / out_degree[u];
+
+        in_degree[v]++;
+    }
+
+    free(src_edges);
+    free(dst_edges);
+    free(in_degree);
+    return 0;
+}
+
+// Funzione SpMV ottimizzata per CSR (Compatibile C89)
+void csr_spmv_range(double *val, int *colind, int *rowptr, double *prold,
+                    double *prnew, int row_start, int row_end, int displ)
+{
+    // Dichiarazioni in cima al blocco
+    int i, j;
+    int start_idx, end_idx;
+    double sum;
+
+    for (i = row_start; i < row_end; i++) {
+        sum = 0.0;
+        start_idx = rowptr[i] - displ;
+        end_idx   = rowptr[i + 1] - displ;
+
+        for (j = start_idx; j < end_idx; j++) {
+            sum += val[j] * prold[colind[j]];
+        }
+        // Assegnamento DIRETTO. Nessuna Race Condition e nessuna sovrascrittura sparsa!
+        prnew[i] = sum;
+    }
+}
