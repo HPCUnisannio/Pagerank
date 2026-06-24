@@ -9,7 +9,10 @@
 
 #define MASTER 0
 #define DAMPING 0.85
-#define ERROR 1e-6
+#define ERROR 1e-5
+
+// OTTIMIZZAZIONI
+#define USE_SINK_HANDLING 1     // Gestione nodi pozzo
 
 int main(int argc, char **argv)
 {
@@ -29,7 +32,8 @@ int main(int argc, char **argv)
     double compute_start = 0.0, compute_end = 0.0;
     double total_start = 0.0, total_end = 0.0;
 
-    // Start total timing on master only
+    double global_sink_sum = 0.0;
+
     if (rank == MASTER) {
         total_start = measure_get_time();
         setup_start = measure_get_time();
@@ -39,7 +43,7 @@ int main(int argc, char **argv)
        LOAD GRAPH ONLY ON MASTER
     ---------------------- */
     if (rank == MASTER) {
-        if (csr_build_from_file("dataset/data0.dat", &master_g) != 0) {
+        if (csr_build_from_file("dataset/data2.dat", &master_g) != 0) {
             printf("Graph loading failed\n");
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
@@ -82,11 +86,11 @@ int main(int argc, char **argv)
     MPI_Bcast(g.outdeg, N, MPI_INT, MASTER, MPI_COMM_WORLD);
 
     /* ----------------------
-       CLEAN UP MASTER GRAPH (only on master)
+       CLEAN UP MASTER GRAPH
     ---------------------- */
     if (rank == MASTER) {
         csr_free(&master_g);
-        setup_end = measure_get_time();  // End setup timing on master
+        setup_end = measure_get_time();
     }
 
     /* ----------------------
@@ -99,7 +103,7 @@ int main(int argc, char **argv)
         pr[i] = 1.0 / N;
 
     /* ----------------------
-       IMPROVED PARTITIONING WITH BALANCED DISTRIBUTION
+       PARTITIONING
     ---------------------- */
     int start = 0;
     int end = 0;
@@ -123,61 +127,98 @@ int main(int argc, char **argv)
     end = start + counts[rank];
 
     /* ----------------------
-       PREALLOC GLOBAL BUFFER
+       SINK NODES
     ---------------------- */
-    double *global = malloc(N * sizeof(double));
+    #if USE_SINK_HANDLING
+    int local_sink_count = 0;
+    int global_sink_count = 0;
 
+    for (i = start; i < end; i++) {
+        if (g.outdeg[i] == 0) {
+            local_sink_count++;
+        }
+    }
+
+    MPI_Reduce(&local_sink_count, &global_sink_count, 1, MPI_INT, MPI_SUM, MASTER, MPI_COMM_WORLD);
+
+    if (rank == MASTER && global_sink_count > 0) {
+        printf("Sink nodes: %d\n", global_sink_count);
+    }
+    #endif
+
+    double *global = malloc(N * sizeof(double));
     double norm;
 
-    // Start compute timing on all ranks (sync all ranks first)
     MPI_Barrier(MPI_COMM_WORLD);
     if (rank == MASTER) {
         compute_start = measure_get_time();
     }
 
     /* ----------------------
-       ITERATION
+       MAIN ITERATION
     ---------------------- */
     int iteration_count = 0;
+    double const_factor = (1.0 - DAMPING) / N;
+    
     do {
-        for (i = 0; i < N; i++)
-            local[i] = 0.0;
+        // Reset local array
+        memset(local, 0, N * sizeof(double));
 
-        /* CSR COMPUTE */
+        /* SINK HANDLING */
+        #if USE_SINK_HANDLING
+        double local_sink_sum = 0.0;
         for (i = start; i < end; i++) {
-            int j;
-            for (j = g.row_ptr[i]; j < g.row_ptr[i + 1]; j++) {
-                local[g.col_idx[j]] += g.val[j] * pr[i];
+            if (g.outdeg[i] == 0) {
+                local_sink_sum += pr[i];
             }
         }
 
-        /* GLOBAL REDUCTION */
-        MPI_Allreduce(local, global, N,
-                      MPI_DOUBLE, MPI_SUM,
-                      MPI_COMM_WORLD);
+        MPI_Allreduce(&local_sink_sum, &global_sink_sum, 1, 
+                      MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        double sink_contrib = global_sink_sum / N;
+        #endif
+
+        /* CSR COMPUTE */
+        for (i = start; i < end; i++) {
+            if (g.outdeg[i] == 0) continue;
+            
+            int row_start = g.row_ptr[i];
+            int row_end = g.row_ptr[i + 1];
+            double pr_i = pr[i];
+            
+            int j;
+            for (j = row_start; j < row_end; j++) {
+                local[g.col_idx[j]] += g.val[j] * pr_i;
+            }
+        }
+
+        /* GLOBAL REDUCTION - SINGOLA CHIAMATA MPI */
+        MPI_Allreduce(local, global, N, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
         /* UPDATE */
         double norm_local = 0.0;
 
+        #if USE_SINK_HANDLING
         for (i = 0; i < N; i++) {
-            double newv =
-                DAMPING * global[i]
-                + (1.0 - DAMPING) / N;
-
-            norm_local += (newv - pr[i]) * (newv - pr[i]);
+            double newv = DAMPING * (global[i] + sink_contrib) + const_factor;
+            double diff = newv - pr[i];
+            norm_local += diff * diff;
             pr[i] = newv;
         }
+        #else
+        for (i = 0; i < N; i++) {
+            double newv = DAMPING * global[i] + const_factor;
+            double diff = newv - pr[i];
+            norm_local += diff * diff;
+            pr[i] = newv;
+        }
+        #endif
 
-        MPI_Allreduce(&norm_local, &norm,
-                      1, MPI_DOUBLE,
-                      MPI_SUM, MPI_COMM_WORLD);
-
+        MPI_Allreduce(&norm_local, &norm, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         norm = sqrt(norm);
         iteration_count++;
-
     } while (norm > ERROR);
 
-    // End compute timing on master
     MPI_Barrier(MPI_COMM_WORLD);
     if (rank == MASTER) {
         compute_end = measure_get_time();
@@ -185,21 +226,19 @@ int main(int argc, char **argv)
     }
 
     /* ----------------------
-       CHECK PR SUM (Total probability mass)
+       CHECK PR SUM
     ---------------------- */
     double local_pr_sum = 0.0;
     double global_pr_sum = 0.0;
     
-    // Each rank computes sum of PR values in its partition
     for (i = start; i < end; i++) {
         local_pr_sum += pr[i];
     }
     
-    // Reduce to get total sum across all ranks
     MPI_Reduce(&local_pr_sum, &global_pr_sum, 1, MPI_DOUBLE, MPI_SUM, MASTER, MPI_COMM_WORLD);
 
     /* ----------------------
-       FINAL OUTPUT (SAFE)
+       FINAL OUTPUT
     ---------------------- */
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -255,7 +294,6 @@ int main(int argc, char **argv)
         FILE *seq_file = fopen("sequential/sequential_time.txt", "r");
         if (seq_file != NULL) {
             if (fscanf(seq_file, "%lf", &seq_time) == 1) {
-                printf("\n");
                 printf("╔════════════════════════════════════════════════════════════════╗\n");
                 printf("║                    PERFORMANCE METRICS                        ║\n");
                 printf("╠════════════════════════════════════════════════════════════════╣\n");
@@ -263,17 +301,15 @@ int main(int argc, char **argv)
                 printf("║  Compute Time:        %12.6f seconds                        ║\n", compute_time);
                 printf("║  Total Time:          %12.6f seconds                        ║\n", total_time);
                 printf("║  Sequential Time:     %12.6f seconds                        ║\n", seq_time);
+                printf("║  MPI Processes:       %12d                                  ║\n", size);
                 printf("╠════════════════════════════════════════════════════════════════╣\n");
 
-                // Calculate speedup
-                double speedup = measure_speedup(seq_time, total_time);
+                double speedup = measure_speedup(seq_time, compute_time);
                 printf("║  Speedup:             %12.4f x                             ║\n", speedup);
                 
-                // Calculate efficiency
                 double efficiency = measure_efficiency(speedup, size);
                 printf("║  Efficiency:          %12.2f%%                             ║\n", efficiency * 100.0);
                 
-                // Performance improvement
                 double improvement = ((seq_time - total_time) / seq_time) * 100.0;
                 if (improvement > 0) {
                     printf("║  Improvement:         %+12.2f%%                             ║\n", improvement);
@@ -281,20 +317,21 @@ int main(int argc, char **argv)
                     printf("║  Improvement:         %12.2f%% (slower)                  ║\n", improvement);
                 }
 
-                // Communication overhead estimation
                 double comm_overhead = measure_communication_overhead(total_time, compute_time);
                 printf("║  Communication Overhead: %10.2f%%                           ║\n", comm_overhead);
                 
-                // Load balance
                 double max_count = counts[0];
                 double avg_count = (double)N / size;
-                int r;
                 for (r = 1; r < size; r++) {
                     if (counts[r] > max_count) max_count = counts[r];
                 }
                 double load_balance = measure_load_balance(max_count, avg_count);
                 printf("║  Load Balance:        %12.2f%%                             ║\n", load_balance * 100.0);
                 printf("║  Partition Size:      avg=%.1f, max=%.0f                 ║\n", avg_count, max_count);
+                
+                #if USE_SINK_HANDLING
+                printf("║  Sink Nodes:          %12d                                  ║\n", global_sink_count);
+                #endif
                 
                 printf("╚════════════════════════════════════════════════════════════════╝\n");
                 printf("\n");
