@@ -158,6 +158,7 @@ int main(int argc, char **argv)
         }
     }
     MPI_Allreduce(&dm_local, &dm_global, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    dm_local = 0.0;
 
     // APERTURA REGIONE PARALLELA OPENMP
     #pragma omp parallel
@@ -165,7 +166,7 @@ int main(int argc, char **argv)
         int r, j;
         do {
             // Fase A: SpMV parallela su righe CSR (Nessun conflitto di scrittura)
-            #pragma omp for schedule(dynamic, 64)
+            #pragma omp for schedule(guided)
             for (r = global_row_start; r < global_row_end; r++) {
                 int start_idx = rowptr[r] - displs[rank];
                 int end_idx   = rowptr[r + 1] - displs[rank];
