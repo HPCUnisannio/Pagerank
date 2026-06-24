@@ -304,7 +304,8 @@ int main(int argc, char **argv)
                 // Bilanciamento del carico reale calcolato sugli archi (NNZ) assegnati ai processi
                 double max_nnz = sendcnts[0];
                 double avg_nnz = (double)EDGES / NPROC;
-                for (int r = 1; r < NPROC; r++) {
+                int r;
+                for (r = 1; r < NPROC; r++) {
                     if (sendcnts[r] > max_nnz) max_nnz = sendcnts[r];
                 }
                 double load_balance = measure_load_balance(max_nnz, avg_nnz);
