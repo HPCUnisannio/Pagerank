@@ -65,15 +65,18 @@ double measure_load_balance(double max_local_time, double avg_local_time) {
 }
 
 /* ===== UTILITY FUNCTIONS ===== */
-
-void measure_print_summary(const char *label, double setup_time, double compute_time, double total_time) {
+void measure_print_summary(const char *label, double setup_time, double compute_time, double total_time, int iteration_count) {
+    double comm_overhead = measure_communication_overhead(total_time, compute_time);
     printf("\n");
     printf("╔════════════════════════════════════════════════════════════╗\n");
     printf("║  EXECUTION SUMMARY: %s\n", label);
     printf("╠════════════════════════════════════════════════════════════╣\n");
-    printf("║  Setup Time:       %.6f seconds\n", setup_time);
-    printf("║  Compute Time:     %.6f seconds\n", compute_time);
-    printf("║  Total Time:       %.6f seconds\n", total_time);
+    printf("║  Setup Time:                  %.6f s\n", setup_time);
+    printf("║  Compute Time:                %.6f s\n", compute_time);
+    printf("║  Total Time:                  %.6f s\n", total_time);
+    printf("║\n");
+    printf("║  Communication Overhead: %10.2f%%\n", comm_overhead);
+    printf("║  Iterations:                  %d\n", iteration_count);
     printf("╚════════════════════════════════════════════════════════════╝\n");
     printf("\n");
 }
@@ -86,18 +89,18 @@ void measure_print_comparison(const char *label1, double time1,
     printf("╔════════════════════════════════════════════════════════════╗\n");
     printf("║  PERFORMANCE COMPARISON\n");
     printf("╠════════════════════════════════════════════════════════════╣\n");
-    printf("║  %-30s  Time: %.6f sec\n", label1, time1);
-    printf("║  %-30s  Time: %.6f sec\n", label2, time2);
+    printf("║  %-30s  Time: %.6f s\n", label1, time1);
+    printf("║  %-30s  Time: %.6f s\n", label2, time2);
     printf("╠════════════════════════════════════════════════════════════╣\n");
     
     if (speedup > 0) {
-        printf("║  Speedup (vs %s):           %.4f x\n", label1, speedup);
+        printf("║  Speedup (vs %s):       %.4f x\n", label1, speedup);
         
         double improvement = ((time1 - time2) / time1) * 100.0;
         if (improvement > 0) {
-            printf("║  Performance Improvement:  %.2f%%\n", improvement);
+            printf("║  Performance Improvement:        %.2f%%\n", improvement);
         } else {
-            printf("║  Performance Degradation:  %.2f%%\n", fabs(improvement));
+            printf("║  Performance Degradation:        %.2f%%\n", fabs(improvement));
         }
     }
     

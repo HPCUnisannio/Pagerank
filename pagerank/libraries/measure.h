@@ -91,7 +91,7 @@ double measure_load_balance(double max_local_time, double avg_local_time);
  * @param compute_time Time taken for computation phase
  * @param total_time Total execution time (setup + compute)
  */
-void measure_print_summary(const char *label, double setup_time, double compute_time, double total_time);
+void measure_print_summary(const char *label, double setup_time, double compute_time, double total_time, int iteration_count);
 
 /**
  * Compare two execution times and print comparison

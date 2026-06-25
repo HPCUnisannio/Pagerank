@@ -39,6 +39,10 @@ int main(int argc, char *argv[])
 
     double norm, norm_sq;
 
+    int col, i, j;
+
+    int iteration_count = 0;
+
     if (!val || !rowind || !colptr || !prold || !prnew || !sum) {
         fprintf(stderr, "Errore: allocazione memoria fallita\n");
         return 1;
@@ -56,7 +60,7 @@ int main(int argc, char *argv[])
     csc_normalize_columns(NODES, EDGES, val, colptr, sum);
 
     // Initialize PageRank vector
-    for(int i = 0; i < NODES; i++) {
+    for(i = 0; i < NODES; i++) {
         prold[i] = 1.0 / NODES;
         damp1[i] = 0.85;
         damp2[i] = 0.15 / NODES;
@@ -69,10 +73,9 @@ int main(int argc, char *argv[])
 
     // Power iteration
     double t_compute_start = get_time();
-
-    int col, i, j;
     
     do {
+        iteration_count++;
         memset(prnew, 0, NODES * sizeof(double));
 
         // Compute dangling mass and redistribution
@@ -86,7 +89,7 @@ int main(int argc, char *argv[])
 		}
 
 		for(i = 0; i<NODES; i++) {
-			prnew[i] = prnew[i]*damp1[i]+damp2[i];
+			prnew[i] = prnew[i]*damp1[i]+damp2[i] + ((dangling_mass * damp1[i]) / NODES);
 		}
 
         //norm calculation and vector copying from new to old
@@ -106,7 +109,7 @@ int main(int argc, char *argv[])
     double total_time = t_compute_end - t_setup_start;
 
     // Print execution summary using measure library
-    measure_print_summary("SEQUENTIAL BASELINE", setup_time, compute_time, total_time);
+    measure_print_summary("SEQUENTIAL BASELINE", setup_time, compute_time, total_time, iteration_count);
 
     // Validate PageRank sum equals 1.0
     double sum_pr = 0.0;
@@ -114,8 +117,27 @@ int main(int argc, char *argv[])
         sum_pr += prnew[i];
     }
 
-    printf("VERIFICA MATEMATICA: Somma finale PR = %.10f\n", sum_pr);
-    printf("=============================================\n");
+    /* ----------------------
+        PRINT PR SUM CHECK
+    ---------------------- */
+    printf("╔════════════════════════════════════════════════════════════╗\n");
+    printf("║  PR SUM CHECK                             \n");
+    printf("╠════════════════════════════════════════════════════════════╣\n");
+    printf("║  Total PR Sum:        %12.10f                              \n", sum_pr);
+    printf("║  Expected Sum:        %12.10f              \n", 1.0);
+
+    double pr_diff = fabs(sum_pr - 1.0);
+    printf("║  Difference:          %12.10f                               \n", pr_diff);
+
+    if (pr_diff < 1e-9) {
+        printf("║  Status:              ✓ PASSED (within tolerance)         \n");
+    } else if (pr_diff < 1e-6) {
+        printf("║  Status:              ⚠ WARNING (slightly off)            \n");
+    } else {
+        printf("║  Status:              ✗ FAILED (significant error)        \n");
+    }
+    printf("╚════════════════════════════════════════════════════════════╝\n");
+    printf("\n");
 
     /*
     for(i = 0; i < NODES; i++) {

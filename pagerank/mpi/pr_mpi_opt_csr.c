@@ -29,12 +29,13 @@ int main(int argc, char *argv[])
     const char* FILEPATH = graph->filepath;
 
     if (rank == MASTER) {
-        printf("\n======================================================\n");
-        printf(" AVVIO PAGERANK (PURE MPI - Ottimizzazione CSR)\n");
-        printf("======================================================\n");
-        printf(" -> Processi MPI totali : %d\n", NPROC);
-        printf(" -> Struttura Dati      : Compressed Sparse Row (CSR)\n");
-        printf("======================================================\n\n");
+        printf("╔════════════════════════════════════════════════════════════╗\n");
+        printf("║  AVVIO PAGERANK MPI Ottimizzato\n");
+        printf("╠════════════════════════════════════════════════════════════╣\n");
+        printf("║  Nodi: %d - Archi: %d\n", NODES, EDGES);
+        printf("║  Processi MPI totali : %d\n", NPROC);
+        printf("║  Struttura Dati      : Compressed Sparse Row (CSR)\n");
+        printf("╚════════════════════════════════════════════════════════════╝\n\n");
         fflush(stdout);
     }
 
@@ -213,88 +214,70 @@ int main(int argc, char *argv[])
 
         double sum_pr = pagerank_validate(NODES, prold);
 
-        printf("\n===== FINAL PAGERANK =====\n");
-        printf("Number of nodes: %d\n", NODES);
-        printf("Number of edges: %d\n", EDGES);
-        printf("Iterations: %d\n", iteration_count);
-        printf("MPI Processes: %d\n", NPROC);
-        printf("OpenMP Threads: N/A (Pure MPI)\n");
-        printf("Total execution units: %d\n", NPROC);
-        printf("\n");
-
         /* ----------------------
             PRINT PR SUM CHECK
         ---------------------- */
-        printf("╔════════════════════════════════════════════════════════════════╗\n");
-        printf("║                    PR SUM CHECK                                ║\n");
-        printf("╠════════════════════════════════════════════════════════════════╣\n");
-        printf("║  Total PR Sum:        %12.10f                               ║\n", sum_pr);
-        printf("║  Expected Sum:        %12.10f (should be 1.0)             ║\n", 1.0);
+        printf("╔════════════════════════════════════════════════════════════╗\n");
+        printf("║  PR SUM CHECK                             \n");
+        printf("╠════════════════════════════════════════════════════════════╣\n");
+        printf("║  Total PR Sum:        %12.10f                              \n", sum_pr);
+        printf("║  Expected Sum:        %12.10f                             \n", 1.0);
 
         double pr_diff = fabs(sum_pr - 1.0);
-        printf("║  Difference:          %12.10f                               ║\n", pr_diff);
+        printf("║  Difference:          %12.10f                               \n", pr_diff);
 
         if (pr_diff < 1e-9) {
-            printf("║  Status:              ✓ PASSED (within tolerance)          ║\n");
+            printf("║  Status:              ✓ PASSED (within tolerance)         \n");
         } else if (pr_diff < 1e-6) {
-            printf("║  Status:              ⚠ WARNING (slightly off)            ║\n");
+            printf("║  Status:              ⚠ WARNING (slightly off)            \n");
         } else {
-            printf("║  Status:              ✗ FAILED (significant error)        ║\n");
+            printf("║  Status:              ✗ FAILED (significant error)        \n");
         }
-        printf("╚════════════════════════════════════════════════════════════════╝\n");
+        printf("╚════════════════════════════════════════════════════════════╝\n");
         printf("\n");
 
+        /* ----------------------
+            TIME PERFORMANCE & METRICS DISPLAY
+        ---------------------- */
+        // Print execution summary
+        char label[100];
+        sprintf(label, "MPI BASE (%d processes)", NPROC);
+        measure_print_summary(label, setup_time, compute_time, total_time, iteration_count);
+
+        printf("\n");
+        printf("╔════════════════════════════════════════════════════════════╗\n");
+        printf("║  LOAD BALANCE                             \n");
+        printf("╠════════════════════════════════════════════════════════════╣\n");
+
+        // Bilanciamento del carico reale calcolato sugli archi (NNZ) assegnati ai processi
+        double max_nnz = sendcnts[0];
+        double avg_nnz = (double)EDGES / NPROC;
+        int r;
+        for (r = 1; r < NPROC; r++) {
+            if (sendcnts[r] > max_nnz) max_nnz = sendcnts[r];
+        }
+        double load_balance = measure_load_balance(max_nnz, avg_nnz);
+        printf("║  Load Balance (NNZ):  %12.2f%%                             \n", load_balance * 100.0);
+        printf("║  Partition Size (NNZ): avg=%.1f, max=%.0f                  \n", avg_nnz, max_nnz);
+
+        printf("╚════════════════════════════════════════════════════════════╝\n");
+        printf("\n");
 
         /* ----------------------
             READ SEQUENTIAL TIME & METRICS DISPLAY
         ---------------------- */
-        double seq_time = 0.0;
+        double sequential_time = 0.0;
         FILE *seq_file = fopen("sequential/sequential_time.txt", "r");
         if (seq_file != NULL) {
-            if (fscanf(seq_file, "%lf", &seq_time) == 1) {
-                printf("╔════════════════════════════════════════════════════════════════╗\n");
-                printf("║                    PERFORMANCE METRICS                         ║\n");
-                printf("╠════════════════════════════════════════════════════════════════╣\n");
-                printf("║  Setup Time:          %12.6f seconds                       ║\n", setup_time);
-                printf("║  Compute Time:        %12.6f seconds                       ║\n", compute_time);
-                printf("║  Total Time:          %12.6f seconds                       ║\n", total_time);
-                printf("║  Sequential Time:     %12.6f seconds                       ║\n", seq_time);
-                printf("║  MPI Processes:       %12d                                 ║\n", NPROC);
-                printf("╠════════════════════════════════════════════════════════════════╣\n");
-
-                double speedup = measure_speedup(seq_time, compute_time);
-                printf("║  Speedup:             %12.4f x                             ║\n", speedup);
-
-                double efficiency = measure_efficiency(speedup, NPROC);
-                printf("║  Efficiency:          %12.2f%%                             ║\n", efficiency * 100.0);
-
-                double improvement = ((seq_time - total_time) / seq_time) * 100.0;
-                if (improvement > 0) {
-                    printf("║  Improvement:         %+12.2f%%                             ║\n", improvement);
-                } else {
-                    printf("║  Improvement:         %12.2f%% (slower)                    ║\n", improvement);
-                }
-
-                double comm_overhead = measure_communication_overhead(total_time, compute_time);
-                printf("║  Communication Overhead: %10.2f%%                           ║\n", comm_overhead);
-
-                // Bilanciamento del carico reale calcolato sugli archi (NNZ) assegnati ai processi
-                double max_nnz = sendcnts[0];
-                double avg_nnz = (double)EDGES / NPROC;
-                int r;
-                for (r = 1; r < NPROC; r++) {
-                    if (sendcnts[r] > max_nnz) max_nnz = sendcnts[r];
-                }
-                double load_balance = measure_load_balance(max_nnz, avg_nnz);
-                printf("║  Load Balance (NNZ):  %12.2f%%                             ║\n", load_balance * 100.0);
-                printf("║  Partition Size (NNZ): avg=%.1f, max=%.0f                  ║\n", avg_nnz, max_nnz);
-
-                printf("╚════════════════════════════════════════════════════════════════╝\n");
-                printf("\n");
-            } else {
-                printf("Warning: Could not read sequential time from file\n");
-            }
+            fscanf(seq_file, "%lf", &sequential_time);
             fclose(seq_file);
+
+            char label1[30];
+            sprintf(label1, "Sequenziale");
+            char label2[30];
+            sprintf(label2, "MPI (%d processes)", NPROC);
+            
+            measure_print_comparison(label1, sequential_time, label2, compute_time);
         } else {
             printf("Warning: Could not open sequential/sequential_time.txt\n");
         }

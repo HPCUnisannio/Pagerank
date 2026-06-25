@@ -37,17 +37,17 @@ int main(int argc, char **argv)
     MPI_Comm_size(MPI_COMM_WORLD, &NPROC);
 
     if (rank == MASTER) {
-        printf("\n======================================================\n");
-        printf(" AVVIO PAGERANK IBRIDO OPT (CSR - Lettura Centralizzata)\n");
-        printf("======================================================\n");
-        printf(" -> Processi MPI totali    : %d\n", NPROC);
-        printf(" -> Thread OpenMP/processo : %d\n", num_threads);
-        printf(" -> Core logici totali     : %d\n", NPROC * num_threads);
-        printf(" -> Struttura Dati         : Compressed Sparse Row (CSR)\n");
-        printf("======================================================\n\n");
+        printf("╔════════════════════════════════════════════════════════════╗\n");
+        printf("║  AVVIO PAGERANK MPI + OpenMP\n");
+        printf("╠════════════════════════════════════════════════════════════╣\n");
+        printf("║  Nodi: %d - Archi: %d\n", NODES, EDGES);
+        printf("║  Processi MPI totali    : %d\n", NPROC);
+        printf("║  Thread OpenMP/processo : %d\n", num_threads);
+        printf("║  Core logici totali     : %d\n", NPROC * num_threads);
+        printf("║  Struttura Dati         : Compressed Sparse Row (CSR)\n");
+        printf("╚════════════════════════════════════════════════════════════╝\n\n");
         fflush(stdout);
     }
-
     int j;
 
     // Strutture dati globali della matrice (Allocate solo dal MASTER)
@@ -97,7 +97,6 @@ int main(int argc, char **argv)
         if (csr_build_from_file(FILEPATH, NODES, EDGES, val, colind, rowptr, out_degree) != 0) {
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        printf("CSR costruita e normalizzata centralmente --> Distribuzione dati\n");
         
         int i;
         // Bootstrap iniziale fuori dal loop per la Delayed Dangling Mass
@@ -232,91 +231,71 @@ int main(int argc, char **argv)
 
         double sum_pr = pagerank_validate(NODES, prold);
 
-        printf("\n===== FINAL PAGERANK =====\n");
-        printf("Number of nodes: %d\n", NODES);
-        printf("Number of edges: %d\n", EDGES);
-        printf("Iterations: %d\n", iteration_count);
-        printf("MPI Processes: %d\n", NPROC);
-        printf("OpenMP Threads per MPI process: %d\n", num_threads);
-        printf("Total Threads: %d\n", NPROC * num_threads);
-        printf("\n");
-
         /* ----------------------
             PRINT PR SUM CHECK
         ---------------------- */
-        printf("╔════════════════════════════════════════════════════════════════╗\n");
-        printf("║                    PR SUM CHECK                                ║\n");
-        printf("╠════════════════════════════════════════════════════════════════╣\n");
-        printf("║  Total PR Sum:        %12.10f                               ║\n", sum_pr);
-        printf("║  Expected Sum:        %12.10f (should be 1.0)             ║\n", 1.0);
+        printf("╔════════════════════════════════════════════════════════════╗\n");
+        printf("║  PR SUM CHECK                             \n");
+        printf("╠════════════════════════════════════════════════════════════╣\n");
+        printf("║  Total PR Sum:        %12.10f                              \n", sum_pr);
+        printf("║  Expected Sum:        %12.10f              \n", 1.0);
 
         double pr_diff = fabs(sum_pr - 1.0);
-        printf("║  Difference:          %12.10f                               ║\n", pr_diff);
+        printf("║  Difference:          %12.10f                               \n", pr_diff);
 
         if (pr_diff < 1e-9) {
-            printf("║  Status:              ✓ PASSED (within tolerance)          ║\n");
+            printf("║  Status:              ✓ PASSED (within tolerance)         \n");
         } else if (pr_diff < 1e-6) {
-            printf("║  Status:              ⚠ WARNING (slightly off)            ║\n");
+            printf("║  Status:              ⚠ WARNING (slightly off)            \n");
         } else {
-            printf("║  Status:              ✗ FAILED (significant error)        ║\n");
+            printf("║  Status:              ✗ FAILED (significant error)        \n");
         }
-        printf("╚════════════════════════════════════════════════════════════════╝\n");
+        printf("╚════════════════════════════════════════════════════════════╝\n");
         printf("\n");
 
+
+        /* ----------------------
+            TIME PERFORMANCE & METRICS DISPLAY
+        ---------------------- */
+        // Print execution summary
+        char label[100];
+        sprintf(label, "MPI (%d processes) + OpenMP (%d threads)", NPROC, num_threads);
+        measure_print_summary(label, setup_time, compute_time, total_time, iteration_count);
+
+        printf("\n");
+        printf("╔════════════════════════════════════════════════════════════╗\n");
+        printf("║  LOAD BALANCE                             \n");
+        printf("╠════════════════════════════════════════════════════════════╣\n");
+
+        // Bilanciamento del carico reale calcolato sugli archi (NNZ) assegnati ai processi
+        double max_nnz = sendcnts[0];
+        double avg_nnz = (double)EDGES / NPROC;
+        int r;
+        for (r = 1; r < NPROC; r++) {
+            if (sendcnts[r] > max_nnz) max_nnz = sendcnts[r];
+        }
+        double load_balance = measure_load_balance(max_nnz, avg_nnz);
+        printf("║  Load Balance (NNZ):  %12.2f%%                             \n", load_balance * 100.0);
+        printf("║  Partition Size (NNZ): avg=%.1f, max=%.0f                  \n", avg_nnz, max_nnz);
+
+        printf("╚════════════════════════════════════════════════════════════╝\n");
+        printf("\n");
 
         /* ----------------------
             READ SEQUENTIAL TIME & METRICS DISPLAY
         ---------------------- */
-        double seq_time = 0.0;
+        double sequential_time = 0.0;
         FILE *seq_file = fopen("sequential/sequential_time.txt", "r");
         if (seq_file != NULL) {
-            if (fscanf(seq_file, "%lf", &seq_time) == 1) {
-                printf("\n");
-                printf("╔════════════════════════════════════════════════════════════════╗\n");
-                printf("║                    PERFORMANCE METRICS                         ║\n");
-                printf("╠════════════════════════════════════════════════════════════════╣\n");
-                printf("║  Setup Time:          %12.6f seconds                       ║\n", setup_time);
-                printf("║  Compute Time:        %12.6f seconds                       ║\n", compute_time);
-                printf("║  Total Time:          %12.6f seconds                       ║\n", total_time);
-                printf("║  Sequential Time:     %12.6f seconds                       ║\n", seq_time);
-                printf("╠════════════════════════════════════════════════════════════════╣\n");
+            fscanf(seq_file, "%lf", &sequential_time);
+            fclose(seq_file);
 
-                // Calcolo Speedup ed Efficienza basati sulle tue funzioni di libreria
-                double speedup = measure_speedup(seq_time, compute_time);
-                printf("║  Speedup:             %12.4f x                             ║\n", speedup);
-
-                double efficiency = measure_efficiency(speedup, NPROC * num_threads);
-                printf("║  Efficiency:          %12.2f%%                             ║\n", efficiency * 100.0);
-
-                double improvement = ((seq_time - compute_time) / seq_time) * 100.0;
-                if (improvement > 0) {
-                    printf("║  Improvement:         %+12.2f%%                             ║\n", improvement);
-                } else {
-                    printf("║  Improvement:         %12.2f%% (slower)                    ║\n", improvement);
-                }
-
-                double comm_overhead = measure_communication_overhead(total_time, compute_time);
-                printf("║  Communication Overhead: %10.2f%%                           ║\n", comm_overhead);
-
-                // Bilanciamento del carico reale calcolato sugli archi (NNZ) assegnati ai processi
-                double max_nnz = sendcnts[0];
-                double avg_nnz = (double)EDGES / NPROC;
-                int r;
-                for (r = 1; r < NPROC; r++) {
-                    if (sendcnts[r] > max_nnz) max_nnz = sendcnts[r];
-                }
-                double load_balance = measure_load_balance(max_nnz, avg_nnz);
-                printf("║  Load Balance (NNZ):  %12.2f%%                             ║\n", load_balance * 100.0);
-                printf("║  Partition Size (NNZ): avg=%.1f, max=%.0f                  ║\n", avg_nnz, max_nnz);
-
-                printf("╚════════════════════════════════════════════════════════════════╝\n");
-                printf("\n");
-
-                fclose(seq_file);
-            } else {
-                printf("Warning: Could not read sequential time from file\n");
-                fclose(seq_file);
-            }
+            char label1[30];
+            sprintf(label1, "Sequenziale");
+            char label2[30];
+            sprintf(label2, "MPI (%d processes) + OpenMP (%d threads)", NPROC, num_threads);
+            
+            measure_print_comparison(label1, sequential_time, label2, compute_time);
         } else {
             printf("Warning: Could not open sequential/sequential_time.txt\n");
         }
