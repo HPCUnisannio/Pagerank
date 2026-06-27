@@ -1,0 +1,3 @@
+Versione,Nodi,Processi,T_Setup (s),T_Compute (s),T_Totale (s)
+Sequenziale MEDIUM,1,1,2.79,2.183,4.978
+Sequenziale BIGGEST,1,1,19.2689,20.4705,39.7394
