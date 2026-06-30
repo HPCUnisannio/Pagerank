@@ -1,0 +1,101 @@
+Ecco un'intera sezione pronta da incollare direttamente nel tuo file `README.md`. È strutturata con un taglio professionale, chiaro e fortemente orientato all'analisi ingegneristica, mettendo in risalto l'evoluzione del codice e le raffinate strategie hardware-aware applicate.
+
+---
+
+## 🚀 Implementazione Ibrida MPI + OpenMP (Hardware-Aware)
+
+Questa versione rappresenta l'evoluzione avanzata dell'algoritmo PageRank su cluster di calcolo ad alte prestazioni (HPC). Sfrutta un paradigma di programmazione **ibrido** per massimizzare l'efficienza a ogni livello dell'architettura hardware:
+
+* **MPI (Multi-Node):** Gestisce la distribuzione dei dati e la comunicazione a grana grossa tra i nodi del cluster tramite una topologia di tipo *Bulk Synchronous Parallel* (BSP).
+* **OpenMP (Shared-Memory):** Sfrutta il parallelismo a grana fine all'interno di ogni singolo nodo, parallelizzando il core computazionale sui core fisici disponibili.
+
+La struttura dati fondamentale utilizzata per rappresentare il grafo è la **Compressed Sparse Row (CSR)**, ideale per l'ottimizzazione dell'operazione di *Sparse Matrix-Vector Multiplication* (SpMV).
+
+---
+
+### 🛠️ Architettura delle Ottimizzazioni Applicate
+
+Per superare i limiti fisiologici della memoria condivisa (overhead di sincronizzazione, falsi allineamenti in cache) e della memoria distribuita (latenza di rete), sono state implementate cinque ottimizzazioni ingegneristiche fondamentali:
+
+| Ottimizzazione | Livello Target | Beneficio Principale | Impatto Prestazionale |
+| --- | --- | --- | --- |
+| **NUMA First-Touch Allocation** | Memoria (RAM) | Riduzione dei tempi di accesso alla memoria inter-socket | Abbattimento dei tempi di latenza della RAM |
+| **Contiguous Memory Pooling** | Cache / Rete | Miglioramento della *Cache Locality* e singola chiamata di rete | Riduzione dell'overhead di setup |
+| **SIMD Vectorization** | CPU (Registri) | Esecuzione di più operazioni a virgola mobile per ciclo di clock | Accelerazione del kernel SpMV |
+| **Branchless Programming** | CPU (Pipeline) | Eliminazione dei fallimenti di predizione dei salti condizionali | Pipeline fluide e stabili |
+| **Network Message Coalescing** | Rete (Interconnessione) | Dimezzamento della latenza di rete nelle riduzioni globali | Minor tempo di attesa sulle barriere |
+
+---
+
+### 🔍 Dettaglio Tecnico delle Ottimizzazioni
+
+#### 1. Politica NUMA First-Touch
+
+Nei sistemi multi-socket moderni (es. nodi con doppio processore Intel Xeon o AMD EPYC), l'allocazione della memoria tramite `calloc` o `malloc` non assegna fisicamente le pagine in RAM finché non vengono scritte per la prima volta.
+Nel codice, l'inizializzazione dei vettori PageRank viene forzata all'interno di una regione parallela OpenMP con uno scheduling di tipo `static`:
+
+```c
+#pragma omp parallel
+{
+    #pragma omp for schedule(static)
+    for (i = 0; i < NODES; i++) { ... }
+}
+
+```
+
+> **Perché è cruciale:** Questo assicura che la pagina di memoria venga allocata fisicamente sul banco di RAM **più vicino (local node)** al core della CPU che eseguirà effettivamente il calcolo su quel blocco di dati, evitando il collo di bottiglia del bus inter-socket (es. QPI/UPI o Infinity Fabric).
+
+#### 2. Memory Pooling dei Metadati Strutturali
+
+Invece di allocare separatamente gli array del grafo `rowptr` e `out_degree`, il codice alloca un unico blocco di memoria contiguo (`metadata_buffer`).
+
+* **Vantaggio Computazionale:** Incrementa drasticamente l'efficienza della cache di secondo e terzo livello (L2/L3) durante lo scorrimento dei nodi.
+* **Vantaggio di Rete:** Permette di distribuire l'intera struttura metadati a tutti i processi del cluster tramite una **singola chiamata** `MPI_Bcast`, saturando la banda passante della rete ed evitando le micro-latenze di comunicazioni multiple.
+
+#### 3. Vettorializzazione SIMD Forzata
+
+Il cuore del calcolo del PageRank risiede nel ciclo interno della moltiplicazione matrice-vettore. Attraverso la direttiva `#pragma omp simd`, supportata da una riduzione sul registro locale, si impone al compilatore di generare istruzioni vettoriali hardware (AVX2 o AVX-512):
+
+```c
+#pragma omp simd reduction(+:row_accum)
+for (j = start_idx; j < end_idx; j++) {
+    row_accum += rec_val[j] * prold[rec_colind[j]];
+}
+
+```
+
+I core della CPU riescono così a elaborare fino a 8 elementi `double` (nel caso di AVX-512) in un singolo ciclo di clock.
+
+#### 4. Programmazione Branchless per i "Dangling Nodes"
+
+I nodi senza archi uscenti (*dangling nodes*) richiedono una redistribuzione speciale della massa accumulata. Un approccio standard includerebbe un costrutto condizionale `if (out_degree[i] == 0)`. All'interno di un loop parallelo, questo causerebbe continui fallimenti della predizione dei salti (*branch misprediction*), svuotando la pipeline della CPU e rompendo la vettorializzazione SIMD.
+
+Il problema è stato risolto introducendo una maschera pre-calcolata ed eseguendo un'operazione puramente algebrica:
+
+```c
+// Inizializzazione della maschera al di fuori del loop di calcolo
+dangling_mask[i] = (out_degree[i] == 0) ? 1.0 : 0.0;
+
+// All'interno del loop critico (Branchless)
+dm_local += prnew[r] * dangling_mask[r];
+
+```
+
+#### 5. Coalescenza dei Messaggi di Rete (Message Coalescing)
+
+Alla fine di ogni iterazione, il codice deve calcolare l'errore quadratico (`norm_sq`) e la massa dei dangling node (`dm_local`). Effettuare due chiamate separate a `MPI_Allreduce` raddoppierebbe l'impatto della latenza di rete del cluster.
+
+I dati locali vengono invece fusi in un unico array di due elementi prima di invocare la riduzione sincrona:
+
+```c
+double local_data[2]  = {dm_local, norm_sq_local};
+double global_data[2] = {0.0, 0.0};
+
+MPI_Allreduce(local_data, global_data, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+```
+
+Questa tecnica dimezza il numero di pacchetti di controllo scambiati sulla rete del cluster, un fattore determinante quando si
+scala su un numero elevato di nodi.
+
+---

@@ -1,0 +1,54 @@
+Ottima scelta. L'introduzione dell'asincronia e del partizionamento a blocchi (Local vs Ghost nodes) rappresenta una delle tecniche più avanzate nel calcolo parallelo distribuito per mascherare la latenza di rete.
+
+Ecco una sezione strutturata e dettagliata, pronta per essere inserita nel tuo README, che spiega l'architettura ingegneristica di questa implementazione.
+
+---
+
+## ⚡ Implementazione Asincrona: Overlap Calcolo/Rete e Block PageRank
+
+Questa versione porta l'ottimizzazione dell'algoritmo al livello successivo rompendo il tradizionale paradigma "Bulk Synchronous" (dove la rete e la CPU lavorano in modo alternato). Attraverso l'uso di comunicazioni non bloccanti (`MPI_Iallgatherv`), il codice realizza un perfetto **Overlap tra Computazione e Comunicazione**, permettendo alla CPU di macinare dati mentre le schede di rete (NIC) trasferiscono i vettori in background.
+
+Per rendere possibile questa sovrapposizione, il grafo assegnato a ciascun processo viene pre-processato e diviso in due sotto-strutture indipendenti.
+
+### 🧩 Il Concetto Base: Lo Splitting del Grafo
+
+Durante la fase di setup, ogni processo MPI analizza la propria porzione di matrice CSR (le righe/nodi di cui è responsabile) e classifica gli archi uscenti in due categorie:
+
+1. **Archi Locali (`loc_`):** Collegamenti che puntano a nodi gestiti *dallo stesso processo MPI*. Per calcolare il contributo di questi archi, il processo possiede già in memoria i valori aggiornati del vettore PageRank dell'iterazione precedente.
+2. **Archi Remoti o Ghost Nodes (`rem_`):** Collegamenti che puntano a nodi gestiti *da altri processi MPI*. Per elaborare questi archi, il processo ha assoluta necessità di ricevere i vettori aggiornati tramite la rete.
+
+Questa divisione genera due matrici CSR locali per ogni processo, permettendo di spezzare l'equazione del PageRank in due sommatorie distinte.
+
+### 🧮 Modello Matematico del Block PageRank
+
+La classica moltiplicazione SpMV (Sparse Matrix-Vector) del PageRank viene matematicamente riformulata e disaccoppiata come segue:
+
+$$PR_{new}[r] = \alpha \left( \sum_{j \in \text{Locali}} A_{loc}[r, j] \cdot PR_{old}[j] + \sum_{k \in \text{Remoti}} A_{rem}[r, k] \cdot PR_{old}[k] \right) + \beta + \gamma$$
+
+Dove:
+
+* $\alpha$ rappresenta il Damping Factor standard (es. 0.85).
+* $\beta$ rappresenta la probabilità di salto casuale (Teleportation).
+* $\gamma$ è il contributo ridistribuito uniformemente dai *Dangling Nodes* (nodi senza uscita).
+
+### ⚙️ La Pipeline Asincrona (Core Iterativo)
+
+All'interno del ciclo `do-while`, il lavoro viene orchestrato dai thread OpenMP collaborando con il processo MPI in tre fasi ben distinte:
+
+#### Fase 1: Innesco della Rete e Calcolo Locale
+
+Il thread *Master* lancia la comunicazione asincrona `MPI_Iallgatherv`. Immediatamente dopo, senza attendere che gli altri nodi rispondano, tutti i thread OpenMP iniziano a calcolare la prima parte dell'equazione (la sommatoria locale) iterando sulle strutture `loc_rowptr` e `loc_colind`.
+Il risultato parziale viene salvato nel buffer temporaneo `partial_prnew`.
+
+#### Fase 2: Barriera di Sincronizzazione Rete
+
+Una volta terminato il lavoro locale, la CPU non ha più nulla da fare se non ha ricevuto i dati esterni. Il thread *Master* invoca `MPI_Wait`. Questa attesa, che normalmente rappresenterebbe un collo di bottiglia temporale (Latenza), risulta ora **mascherata**: gran parte (o tutto) il tempo di rete è stato già assorbito dai calcoli della Fase 1.
+
+#### Fase 3: Calcolo Remoto e Chiusura
+
+Ricevuti i vettori completi dal resto del cluster, i thread OpenMP ripartono, elaborando le strutture `rem_rowptr` e `rem_colind` (seconda sommatoria). Il risultato di questa operazione viene sommato al `partial_prnew` precedentemente calcolato, applicando infine i fattori di Damping ($\alpha, \beta$) e ridistribuzione ($\gamma$) per ottenere il valore definitivo di `prnew`.
+
+### 🚀 Vantaggi Prestazionali dell'Overlap
+
+* **Saturazione dell'Hardware:** Si sfrutta il parallelismo a livello di sistema; la CPU non è mai in attesa inattiva (idle) finché ci sono archi locali da processare, massimizzando il throughput computazionale.
+* **Scalabilità Estrema:** Al crescere del numero di nodi del cluster (e quindi della latenza di rete fisiologica), l'architettura asincrona impedisce il degrado delle prestazioni tipico dei modelli sincroni puri, rendendolo ideale per reti Ethernet convenzionali o topologie HPC complesse.
