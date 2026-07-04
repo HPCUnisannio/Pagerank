@@ -172,17 +172,17 @@ done
 #### Compilazione
 
 ```bash
-mpicc <FLAGS> mpi_openMP/pr_hybrid.c \
+mpicc <FLAGS> hybrid/pr_hybrid.c \
 libraries/pagerank_utils.c libraries/data.c libraries/measure.c \
--o mpi_openMP/pr_hybrid -Ilibraries -fopenmp -lm
+-o hybrid/pr_hybrid -Ilibraries -fopenmp -lm
 ```
 
 #### Esecuzione
 
 ```bash
 mpirun -np <NPROC> <OPT> \
--machinefile mpi_openMP/machinefile.txt \
-mpi_openMP/pr_hybrid <NTHREADS>
+-machinefile hybrid/machinefile.txt \
+hybrid/pr_hybrid <NTHREADS>
 ```
 
 #### Benchmark (6 esecuzioni)
@@ -190,8 +190,8 @@ mpi_openMP/pr_hybrid <NTHREADS>
 ```bash
 for i in {1..6}; do
     mpirun -np <NPROC> <OPT> \
-    -machinefile mpi_openMP/machinefile.txt \
-    mpi_openMP/pr_hybrid <NTHREADS>
+    -machinefile hybrid/machinefile.txt \
+    hybrid/pr_hybrid <NTHREADS>
 done
 ```
 
