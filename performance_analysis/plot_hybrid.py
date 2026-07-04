@@ -9,12 +9,12 @@ import numpy as np
 # - 'speedup'   : massimo speedup
 # - 'efficienza': massima efficienza
 CRITERIO = 'speedup'   # <--- CAMBIA QUI per cambiare il criterio
-
+FILENAME = 'pr_hybrid'
 # ------------------------------------------------------------
 # 2. LETTURA DATI
 # ------------------------------------------------------------
 # Carica il dataset ibrido
-df = pd.read_csv('csr/hybrid/results_hybrid_CSR_infiniband.csv')
+df = pd.read_csv('csr/hybrid/pr_hybrid.csv')
 
 # Carica il tempo sequenziale di riferimento
 df_seq = pd.read_csv('results_sequential.csv')
@@ -83,13 +83,12 @@ for i, config in enumerate(configs):
 plt.plot([1, max_procs], [1, max_procs],
          'k--', label='Speedup ideale', linewidth=2)
 plt.title('Speedup per diverse configurazioni ibride MPI+OpenMP')
-plt.xlabel('Processori (core fisici totali)')
+plt.xlabel('Processors')
 plt.ylabel('Speedup')
 plt.grid(True, linestyle='--', color='gray', alpha=0.5)
 plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
-#plt.savefig('speedup_scatter.png', dpi=300, bbox_inches='tight')
-#plt.savefig('speedup_scatter.pdf', bbox_inches='tight')
+plt.savefig(f'{FILENAME}_scatter.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # 5b. Best case + intervallo (secondo il criterio scelto)
@@ -111,13 +110,13 @@ plt.plot([1, max_procs], [1, max_procs],
          'k--', label='Speedup ideale', linewidth=2)
 
 plt.title(f'Analisi Speedup MPI + OpenMP')
-plt.xlabel('Processori (core fisici totali)')
+plt.xlabel('Processors')
 plt.ylabel('Speedup')
 plt.grid(True, linestyle='--', color='gray', alpha=0.5)
 plt.legend()
 plt.tight_layout()
-#plt.savefig('speedup_bestcase.png', dpi=300, bbox_inches='tight')
-#plt.savefig('speedup_bestcase.pdf', bbox_inches='tight')
+plt.savefig(f'{FILENAME}_speedup.png', dpi=300, bbox_inches='tight')
+#plt.savefig(f'{FILENAME}_speedup.pdf', bbox_inches='tight')
 plt.show()
 
 
@@ -132,13 +131,12 @@ for i, config in enumerate(configs):
                 label=config, color=colors[i], s=80, alpha=0.7)
 plt.axhline(y=1.0, color='k', linestyle='--', label='Efficienza ideale', linewidth=2)
 plt.title('Efficienza per diverse configurazioni ibride')
-plt.xlabel('Processori (core fisici totali)')
+plt.xlabel('Processors')
 plt.ylabel('Efficienza')
 plt.grid(True, linestyle='--', color='gray', alpha=0.5)
 plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
-#plt.savefig('efficienza_scatter.png', dpi=300, bbox_inches='tight')
-#plt.savefig('efficienza_scatter.pdf', bbox_inches='tight')
+plt.savefig(f'{FILENAME}_efficienza_scatter.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # 6b. Best case + intervallo (secondo il criterio scelto)
@@ -159,13 +157,12 @@ plt.plot(df_best['Processori'], df_best['Efficienza_float'],
 plt.axhline(y=1.0, color='k', linestyle='--', label='Efficienza ideale', linewidth=2)
 
 plt.title(f'Analisi Efficienza MPI + OpenMP')
-plt.xlabel('Processori (core fisici totali)')
+plt.xlabel('Processors')
 plt.ylabel('Efficienza')
 plt.grid(True, linestyle='--', color='gray', alpha=0.5)
 plt.legend()
 plt.tight_layout()
-#plt.savefig('efficienza_bestcase.png', dpi=300, bbox_inches='tight')
-#plt.savefig('efficienza_bestcase.pdf', bbox_inches='tight')
+plt.savefig(f'{FILENAME}_efficienza_hybrid.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 
