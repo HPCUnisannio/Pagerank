@@ -121,3 +121,5 @@ launch.json
 
 # Linux
 .vagrant/
+
+*dataset/
