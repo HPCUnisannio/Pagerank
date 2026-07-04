@@ -18,8 +18,7 @@
 #### Compilazione
 
 ```bash
-gcc sequential/pr_sequential.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c \
--o sequential/pr_sequential -Ilibraries -lm
+gcc sequential/pr_sequential.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o sequential/pr_sequential -Ilibraries -lm
 ```
 
 #### Esecuzione
@@ -45,8 +44,7 @@ done
 #### Compilazione
 
 ```bash
-gcc pthread/pr_pthread.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c \
--o pthread/pr_pthread -Ilibraries -lpthread -lm
+gcc pthread/pr_pthread.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o pthread/pr_pthread -Ilibraries -lpthread -lm
 ```
 
 #### Esecuzione
@@ -62,8 +60,7 @@ gcc pthread/pr_pthread.c libraries/pagerank_utils.c libraries/data.c libraries/m
 #### Compilazione
 
 ```bash
-gcc pthread/pr_pthread_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c \
--o pthread/pr_pthread_opt -Ilibraries -lpthread -lm
+gcc pthread/pr_pthread_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o pthread/pr_pthread_opt -Ilibraries -lpthread -lm
 ```
 
 #### Esecuzione
@@ -81,9 +78,7 @@ gcc pthread/pr_pthread_opt.c libraries/pagerank_utils.c libraries/data.c librari
 #### Compilazione
 
 ```bash
-gcc <FLAGS> -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c \
-libraries/pagerank_utils.c libraries/data.c libraries/measure.c \
--Ilibraries -lm
+gcc <FLAGS> -o openmp/pr_openmp_opt openmp/pr_openmp_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -Ilibraries -lm
 ```
 
 #### Esecuzione
@@ -101,36 +96,25 @@ libraries/pagerank_utils.c libraries/data.c libraries/measure.c \
 #### Compilazione
 
 ```bash
-mpicc <FLAGS> mpi/pr_mpi.c libraries/pagerank_utils.c \
-libraries/data.c libraries/measure.c \
--o mpi/pr_mpi -Ilibraries -lm
+mpicc <FLAGS> mpi/pr_mpi.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi/pr_mpi -Ilibraries -lm
 ```
 
 #### Compilazione con MPE
 
 ```bash
-mpecc <FLAGS> -mpilog -lpthread \
--o mpi/pr_mpi -Ilibraries -lm \
-mpi/pr_mpi.c libraries/pagerank_utils.c \
-libraries/data.c libraries/measure.c
+mpecc <FLAGS> -mpilog -lpthread -o mpi/pr_mpi -Ilibraries -lm mpi/pr_mpi.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c
 ```
 
 #### Esecuzione
 
 ```bash
-mpirun -np <NPROC> <OPT> \
--machinefile mpi/machinefile.txt \
-mpi/pr_mpi
+mpirun -np <NPROC> <OPT> -machinefile mpi/machinefile.txt mpi/pr_mpi
 ```
 
 #### Benchmark (6 esecuzioni)
 
 ```bash
-for i in {1..6}; do
-    mpirun -np <NPROC> <OPT> \
-    -machinefile mpi/machinefile.txt \
-    mpi/pr_mpi
-done
+for i in {1..6}; do mpirun -np <NPROC> <OPT> -machinefile mpi/machinefile.txt mpi/pr_mpi; done
 ```
 
 ---
@@ -140,27 +124,19 @@ done
 #### Compilazione
 
 ```bash
-mpicc <FLAGS> mpi/pr_mpi_opt.c libraries/pagerank_utils.c \
-libraries/data.c libraries/measure.c \
--o mpi/pr_mpi_opt -Ilibraries -lm
+mpicc <FLAGS> mpi/pr_mpi_opt.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o mpi/pr_mpi_opt -Ilibraries -lm
 ```
 
 #### Esecuzione
 
 ```bash
-mpirun -np <NPROC> <OPT> \
--machinefile mpi/machinefile.txt \
-mpi/pr_mpi_opt
+mpirun -np <NPROC> <OPT> -machinefile mpi/machinefile.txt mpi/pr_mpi_opt
 ```
 
 #### Benchmark (6 esecuzioni)
 
 ```bash
-for i in {1..6}; do
-    mpirun -np <NPROC> <OPT> \
-    -machinefile mpi/machinefile.txt \
-    mpi/pr_mpi_opt
-done
+for i in {1..6}; do mpirun -np <NPROC> <OPT> -machinefile mpi/machinefile.txt mpi/pr_mpi_opt; done
 ```
 
 ---
@@ -172,27 +148,19 @@ done
 #### Compilazione
 
 ```bash
-mpicc <FLAGS> hybrid/pr_hybrid.c \
-libraries/pagerank_utils.c libraries/data.c libraries/measure.c \
--o hybrid/pr_hybrid -Ilibraries -fopenmp -lm
+mpicc <FLAGS> hybrid/pr_hybrid.c libraries/pagerank_utils.c libraries/data.c libraries/measure.c -o hybrid/pr_hybrid -Ilibraries -fopenmp -lm
 ```
 
 #### Esecuzione
 
 ```bash
-mpirun -np <NPROC> <OPT> \
--machinefile hybrid/machinefile.txt \
-hybrid/pr_hybrid <NTHREADS>
+mpirun -np <NPROC> <OPT> -machinefile hybrid/machinefile.txt hybrid/pr_hybrid <NTHREADS>
 ```
 
 #### Benchmark (6 esecuzioni)
 
 ```bash
-for i in {1..6}; do
-    mpirun -np <NPROC> <OPT> \
-    -machinefile hybrid/machinefile.txt \
-    hybrid/pr_hybrid <NTHREADS>
-done
+for i in {1..6}; do mpirun -np <NPROC> <OPT> -machinefile hybrid/machinefile.txt hybrid/pr_hybrid <NTHREADS>; done
 ```
 
 ---
