@@ -58,7 +58,6 @@ int main(int argc, char **argv)
     // Vettori PageRank allocati con malloc (nessun page-fault sequenziale come in calloc)
     double *prold = (double *)malloc(NODES * sizeof(double));
     double *prnew = (double *)malloc(NODES * sizeof(double));
-    double *dangling_mask = (double *)malloc(NODES * sizeof(double));
 
     const double DAMP1 = DAMPING;
     const double DAMP2 = (1.0 - DAMPING) / NODES;
@@ -112,17 +111,6 @@ int main(int argc, char **argv)
     MPI_Bcast(metadata_buffer, (2 * NODES + 1), MPI_INT, MASTER, MPI_COMM_WORLD);
     MPI_Bcast(&dm_global, 1, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
 
-    // --- OTTIMIZZAZIONE 2: MASCHERA BRANCHLESS (Dopo Bcast) ---
-    // Ora che tutti i processi conoscono out_degree, inizializziamo la maschera
-    #pragma omp parallel
-    {
-        int i;
-        #pragma omp for schedule(static)
-        for (i = 0; i < NODES; i++) {
-            dangling_mask[i] = (out_degree[i] == 0) ? 1.0 : 0.0;
-        }
-    }
-
     compute_column_distribution(NODES, NPROC, prows, displs_pr);
     compute_nnz_distribution(NPROC, prows, rowptr, sendcnts, displs);
 
@@ -161,27 +149,36 @@ int main(int argc, char **argv)
     {
         int r, j;
         do {
-            // schedule(static) si allinea perfettamente al First-Touch allocato prima
-            #pragma omp for reduction(+:norm_sq_local, dm_local) schedule(static)
+            double local_dm = 0.0;
+            double local_norm = 0.0;
+            
+            #pragma omp for schedule(static) nowait
             for (r = global_row_start; r < global_row_end; r++) {
                 int start_idx = rowptr[r] - displs[rank];
                 int end_idx   = rowptr[r + 1] - displs[rank];
                 double row_accum = 0.0;
-
-                // --- OTTIMIZZAZIONE 3: SIMD VECTORIZATION ---
-                #pragma omp simd reduction(+:row_accum)
+                
+                // SIMD vectorization without reduction clause
+                #pragma omp simd
                 for (j = start_idx; j < end_idx; j++) {
                     row_accum += rec_val[j] * prold[rec_colind[j]];
                 }
-
+                
                 prnew[r] = row_accum * DAMP1 + DAMP2 + (dm_global * DAMP1 / NODES);
-
+                
                 double diff = prnew[r] - prold[r];
-                norm_sq_local += diff * diff;
-
-                // --- OTTIMIZZAZIONE 4: BRANCHLESS PROGRAMMING ---
-                dm_local += prnew[r] * dangling_mask[r];
+                local_norm += diff * diff;
+                if(out_degree[r] == 0) local_dm += prnew[r];
             }
+            
+            // Manual reduction to avoid false sharing
+            #pragma omp atomic
+            norm_sq_local += local_norm;
+            
+            #pragma omp atomic
+            dm_local += local_dm;
+            
+            #pragma omp barrier  // Ensure all threads complete before master
 
             // Sincronizzazione MPI
             #pragma omp master
@@ -291,7 +288,7 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    free(metadata_buffer); free(prold); free(prnew); free(dangling_mask);
+    free(metadata_buffer); free(prold); free(prnew);
     free(sendcnts); free(displs); free(prows); free(displs_pr);
     free(rec_val); free(rec_colind);
 

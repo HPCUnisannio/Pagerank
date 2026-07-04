@@ -53,7 +53,6 @@ int main(int argc, char **argv)
 
     double *prold = (double *)malloc(NODES * sizeof(double));
     double *prnew = (double *)malloc(NODES * sizeof(double));
-    double *dangling_mask = (double *)malloc(NODES * sizeof(double));
 
     // Buffer per memorizzare i risultati parziali (solo archi locali)
     double *partial_prnew = (double *)malloc(NODES * sizeof(double));
@@ -67,18 +66,6 @@ int main(int argc, char **argv)
     int *displs_pr = malloc(NPROC * sizeof(int));
     int rec_row;
     double dm_global = 0.0;
-
-    // First-Touch Vettori
-    #pragma omp parallel
-    {
-        int i;
-        #pragma omp for schedule(static)
-        for (i = 0; i < NODES; i++) {
-            prnew[i] = 0.0;
-            partial_prnew[i] = 0.0;
-            prold[i] = 1.0 / NODES;
-        }
-    }
 
     // ========================================================================
     // 1. SETUP STANDARD E DISTRIBUZIONE
@@ -104,16 +91,6 @@ int main(int argc, char **argv)
     MPI_Bcast(metadata_buffer, (2 * NODES + 1), MPI_INT, MASTER, MPI_COMM_WORLD);
     MPI_Bcast(&dm_global, 1, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
 
-    // Inizializzazione Branchless Mask
-    #pragma omp parallel
-    {
-        int i;
-        #pragma omp for schedule(static)
-        for (i = 0; i < NODES; i++) {
-            dangling_mask[i] = (out_degree[i] == 0) ? 1.0 : 0.0;
-        }
-    }
-
     compute_column_distribution(NODES, NPROC, prows, displs_pr);
     compute_nnz_distribution(NPROC, prows, rowptr, sendcnts, displs);
 
@@ -123,7 +100,7 @@ int main(int argc, char **argv)
     double *rec_val    = (double *)malloc(my_cnt * sizeof(double));
     int    *rec_colind = (int *)malloc(my_cnt * sizeof(int));
 
-// Distribuzione dei vettori della matrice tramite Scatterv
+    // Distribuzione dei vettori della matrice tramite Scatterv
     MPI_Scatterv(val, sendcnts, displs, MPI_DOUBLE, rec_val, my_cnt, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
     MPI_Scatterv(colind, sendcnts, displs, MPI_INT, rec_colind, my_cnt, MPI_INT, MASTER, MPI_COMM_WORLD);
 
@@ -144,7 +121,6 @@ int main(int argc, char **argv)
             prnew[i] = 0.0;
             partial_prnew[i] = 0.0;
             prold[i] = 1.0 / NODES;
-            dangling_mask[i] = (out_degree[i] == 0) ? 1.0 : 0.0; // Inizializzazione Branchless
         }
     }
 
@@ -235,21 +211,27 @@ int main(int argc, char **argv)
     {
         int r, j;
         do {
+            double local_dm = 0.0;
+            double local_norm = 0.0;
+
             #pragma omp master
             {
-                // Copia la parte calcolata nel ciclo precedente nel buffer globale locale
                 if (iteration_count > 0) {
-                    memcpy(prold + global_row_start, prnew + global_row_start, rec_row * sizeof(double));
+                    double *tmp = prold;
+                    prold = prnew;
+                    prnew = tmp;
                 }
-
-                // INIZIO COMUNICAZIONE ASINCRONA
+                
+                // Uso di MPI_IN_PLACE per evitare Data Race con la Fase 1
                 MPI_Iallgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL,
                                 prold, prows, displs_pr, MPI_DOUBLE,
                                 MPI_COMM_WORLD, &req_pr);
             }
+            // FIX 2: Barriera post-swap per far partire i thread all'unisono
+            #pragma omp barrier
 
             // --- FASE 1: CALCOLO LOCALE (Mentre la rete trasmette in background) ---
-            #pragma omp for schedule(static)
+            #pragma omp for schedule(static) nowait
             for (r = 0; r < rec_row; r++) {
                 int global_r = global_row_start + r;
                 double row_accum = 0.0;
@@ -268,22 +250,37 @@ int main(int argc, char **argv)
             #pragma omp barrier // Tutti i thread aspettano i dati
 
             // --- FASE 3: CALCOLO REMOTO E FINALIZZAZIONE ---
-            #pragma omp for reduction(+:norm_sq_local, dm_local) schedule(static)
+            #pragma omp for schedule(static) nowait
             for (r = 0; r < rec_row; r++) {
                 int global_r = global_row_start + r;
-                double row_accum = 0.0;
+                double row_accum = partial_prnew[global_r];  // Start with local sum
+
+                // Add remote contributions
                 #pragma omp simd reduction(+:row_accum)
                 for (j = rem_rowptr[r]; j < rem_rowptr[r + 1]; j++) {
                     row_accum += rem_val[j] * prold[rem_colind[j]];
                 }
 
-                // Fusione accumulatore locale + remoto
-                prnew[global_r] = (partial_prnew[global_r] + row_accum) * DAMP1 + DAMP2 + (dm_global * DAMP1 / NODES);
+                // FIX: Apply the formula ONCE with the complete sum
+                prnew[global_r] = row_accum * DAMP1 + DAMP2 + (dm_global * DAMP1 / NODES);
 
                 double diff = prnew[global_r] - prold[global_r];
-                norm_sq_local += diff * diff;
-                dm_local += prnew[global_r] * dangling_mask[global_r];
+                local_norm += diff * diff;
+                
+                // FIX: Use prold for dangling mass computation
+                if(out_degree[global_r] == 0) {
+                    local_dm += prnew[global_r];
+                }
             }
+
+            // Manual reduction to avoid false sharing
+            #pragma omp atomic
+            norm_sq_local += local_norm;
+            
+            #pragma omp atomic
+            dm_local += local_dm;
+
+            #pragma omp barrier  // Ensure all threads complete before master
 
             // Aggiornamento Metriche
             #pragma omp master
@@ -388,7 +385,7 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    free(metadata_buffer); free(prold); free(prnew); free(dangling_mask); free(partial_prnew);
+    free(metadata_buffer); free(prold); free(prnew); free(partial_prnew);
     free(sendcnts); free(displs); free(prows); free(displs_pr);
     free(loc_rowptr); free(loc_colind); free(loc_val);
     free(rem_rowptr); free(rem_colind); free(rem_val);
